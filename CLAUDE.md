@@ -10,11 +10,17 @@ David's personal knowledge base and life operating system. The AI assistant orga
 - Each area folder has an `_index.md` entry-point summarizing contents and linking to detail files
 - Detail files hold specific content → loaded only when needed
 
-**Smart retrieval — context-first, always:**
-Before answering ANY non-trivial question, ALWAYS do this first:
-1. **Map broadly** — for every question, ask: what files could contain relevant context? Don't just load the obvious topic file. Ask "who is involved?", "what preferences matter?", "what adjacent context would change my answer?" Scan the area index and recent.md for connections. If a question touches travel, also check who's traveling. If it touches work, also check people involved. Always cast wider than your first instinct.
-2. **Load aggressively** — read all identified files in parallel. Use grep/glob to find things you're unsure about. When in doubt, load it — the cost of loading an irrelevant file is near zero; the cost of a generic answer is high.
-3. **Verify before answering** — before writing a response, check: "am I using everything I know? Would this answer change if I loaded one more file?" If yes, go load it.
+**Retrieval protocol (mandatory for every non-trivial message):**
+1. **Extract concepts** — from the user's message, identify: proper nouns (Tom, PetRadar), topic words (business, fitness, travel), emotional/state words (depleted, anxious, motivated), and any specific terms. Aim for 3-7 search terms.
+2. **Run kb-search** — `./kb-search "term1" "term2" "term3"`
+3. **Review results** — look at the summary table and top chunks
+4. **Read relevant files** — any file with high relevance in the results gets read in full
+5. **For complex queries** — spawn sub-agents per topic cluster to compile focused briefs
+6. **Verify before answering** — check: "am I using everything I know? Would this answer change if I loaded one more file?" If yes, go load it.
+
+After responding, if new information was shared:
+7. **Update markdown files** — apply the granular processing rules
+8. **Re-index** — `./kb-index` (only needed if files were modified)
 
 Use the area index below and `_index.md` files in each folder to navigate. Use grep/glob liberally.
 
