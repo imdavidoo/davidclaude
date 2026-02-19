@@ -11,16 +11,17 @@ David's personal knowledge base and life operating system. The AI assistant orga
 - Detail files hold specific content → loaded only when needed
 
 **Retrieval protocol (mandatory for every non-trivial message):**
-1. **Extract concepts** — from the user's message, identify: proper nouns (Tom, PetRadar), topic words (business, fitness, travel), emotional/state words (depleted, anxious, motivated), and any specific terms. Aim for 3-7 search terms.
-2. **Run kb-search** — `./kb-search "term1" "term2" "term3"`
-3. **Review results** — look at the summary table and top chunks
-4. **Read relevant files** — any file with high relevance in the results gets read in full
-5. **For complex queries** — spawn sub-agents per topic cluster to compile focused briefs
-6. **Verify before answering** — check: "am I using everything I know? Would this answer change if I loaded one more file?" If yes, go load it.
+1. **Extract search terms** — be exhaustive. Pull out every name, topic keyword, and descriptive phrase from the message. Mix keywords (exact matches) and phrases (semantic matches, e.g. "conflicting feelings about work"). Don't artificially limit — a dense message might need 8 terms, a simple one might need 2.
+2. **Run kb-search** — for simple queries (1-2 topics): `./kb-search "Tom" "work tension"`. For complex multi-topic queries: spin up a sub-agent per distinct topic direction, each running its own focused search and reading relevant files. This parallelizes and gives each topic full attention.
+3. **Review results** — the full chunk text in the output IS your context. In most cases this is enough.
+4. **Read files only if needed** — only when you need broader context beyond what the chunks showed (e.g., a full person profile, a complete trip itinerary).
+5. **Verify before answering** — check: "am I using everything I know? Would this answer change if I loaded one more file?" If yes, go load it.
 
 After responding, if new information was shared:
-7. **Update markdown files** — apply the granular processing rules
-8. **Re-index** — `./kb-index` (only needed if files were modified)
+6. **Capture aggressively** — extract every distinct new fact, preference, feeling, update, or insight. Err on the side of saving too much. If it's specific to David's life, it belongs in the KB.
+7. **Search before writing** — for each fact/topic, run `./kb-search "keyword" "descriptive phrase"` to find semantically related content that already exists. Use this to decide: merge into existing section, update/reword existing text, delete outdated info, or create new section only if the topic is genuinely new.
+8. **Update markdown files** — apply the granular processing rules below. Reorganize, merge, and restructure aggressively when it makes content clearer.
+9. **Re-index** — `./kb-index` (only needed if files were modified)
 
 Use the area index below and `_index.md` files in each folder to navigate. Use grep/glob liberally.
 
@@ -35,18 +36,10 @@ Use the area index below and `_index.md` files in each folder to navigate. Use g
 
 **Core behavior — granular information processing (every message):**
 David's messages are dense — a single paragraph often contains multiple topics, facts, and insights. The job is to:
-1. **Parse exhaustively** — identify every distinct piece of information, no matter how small
-2. **Categorize precisely** — each bit goes to its specific file and section (personality → `david.md`, relationship → `people.md`, technique → `growth/techniques.md`, etc.)
-3. **Update surgically** — sharpen existing text, add a bullet, reword a sentence, remove outdated info. Don't create big new blocks.
-4. **Deduplicate** — one canonical location per fact. When adding info, search for existing content on the same topic. Merge or replace, never duplicate.
-5. **Prune** — delete outdated/stale info (old dates, completed events, changed circumstances). When unsure, ask.
-6. **Work autonomously** — make structural changes without asking unless it's a major architectural shift. Use subagents for deep processing.
-
-**Rules:**
-- Each fact lives in one place — distribute info to where it belongs, don't duplicate
-- Small updates are valuable — a one-word fix or removed line counts
-- Merge overlapping content, restructure when clearly better
-- Keep this root CLAUDE.md lean — move details to area files as they accumulate
+1. **Parse exhaustively** — identify every distinct piece of information, no matter how small. A single sentence might contain a fact about a person, a preference, and an emotional state — each gets captured separately.
+2. **Update surgically** — sharpen existing text, add a bullet, reword a sentence, remove outdated info. Don't create big new blocks.
+3. **Prune** — delete outdated/stale info (old dates, completed events, changed circumstances). When unsure, ask.
+4. **Work autonomously** — make structural changes, reorganize files, merge sections, restructure content without asking unless it's a major architectural shift. Use subagents for deep processing. Keep this root CLAUDE.md lean — move details to area files as they accumulate.
 
 ## Area Index
 | Area | Path | Contents |
