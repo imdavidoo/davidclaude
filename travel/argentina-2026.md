@@ -14,9 +14,13 @@
 | 4 | Bariloche | ~1 week | Fly from Calafate area |
 | 5 | Buenos Aires | Few days | Return, fly home |
 
+## Accommodation
+- **Buenos Aires**: Airbnb at Santos Dumont 2470, Palermo. Check-in 3 PM.
+
 ## Logistics
 - **Luggage**: Carry-on only
 - **Flights**: KLM (international), JetSmart + Aerolíneas Argentinas (internal)
+- **Transport**: SUBE card purchased for BA public transport (colectivos + subte)
 - **Trekking poles**: Rent locally at each hiking stop
 - ⚠️ Verify JetSmart carry-on weight limit before departure
 
