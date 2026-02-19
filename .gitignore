@@ -3,3 +3,7 @@
 __pycache__/
 *.pyc
 .env
+telegram-bot/node_modules/
+telegram-bot/dist/
+telegram-bot/data/
+telegram-bot/.env
