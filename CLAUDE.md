@@ -30,6 +30,7 @@ Use the area index below and `_index.md` files in each folder to navigate. Use g
 - Dense, specific, no filler. All details that matter, nothing that doesn't.
 - Markdown with headers/lists for fast scanning
 - Self-contained files (understandable without loading others)
+- **H2 = chunk boundary**: The search system indexes by H2 (`##`) sections. Each H2 section should be one focused, self-contained topic. Related info that should be retrieved together goes under the same H2. Separate concerns get separate H2s. Use H3 only for sub-items within a group (e.g., Family → Dad/Mom/Sister).
 - Optimized for AI parsing and minimal token usage
 
 **Core behavior — granular information processing (every message):**

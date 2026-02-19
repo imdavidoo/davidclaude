@@ -92,8 +92,10 @@ def merge_results(chunks: list[dict], keyword_hits: dict, vector_scores: dict, t
         if len(chunk["text"].strip()) < 50:
             continue
 
-        # Skip low-quality matches: weak semantics AND few keyword hits
-        if vs < 0.25 and kw_total < 3:
+        # Skip low-quality matches:
+        # - Semantic-only results need a meaningful score (>= 0.30)
+        # - Any keyword hit is enough to include (keyword match is high-signal)
+        if kw_total == 0 and vs < 0.30:
             continue
 
         # Multiplicative merge: keywords amplify semantic relevance
@@ -144,22 +146,10 @@ def format_output(results: list[dict]) -> str:
         header = f"[{i}] {c['file']} \u00a7{c['section']} [L{c['line_start']}-L{c['line_end']}] ({kw_part}semantic: {r['semantic_score']:.2f})"
         lines.append(header)
 
-        # Show chunk text, truncated to ~500 chars
-        text = c["text"]
-        if len(text) > 500:
-            text = text[:500] + "..."
-        # Indent as blockquote
-        for tl in text.split("\n")[:10]:
+        # Show full chunk text
+        for tl in c["text"].split("\n"):
             lines.append(f"> {tl}")
         lines.append("")
-
-    # Files to consider
-    files_seen = []
-    for r in results:
-        f = r["chunk"]["file"]
-        if f not in files_seen:
-            files_seen.append(f)
-    lines.append(f"---\nFiles to consider reading in full: {', '.join(files_seen)}")
 
     return "\n".join(lines)
 
