@@ -86,6 +86,10 @@ Childhood left him feeling out of control and in pain → developed a coping mec
 - **Whoop** — wearable fitness/recovery tracker
 - **Charachorder** — alternative keyboard using chord-based typing. Built a custom chord library over ~3 weeks (Feb 2026). Much deeper and harder than expected. Believes it's the right long-term investment for a better computer interface, but also uncertain. Currently pausing to integrate it into daily use. Next phase: integration into actual workflow (post-Argentina).
 
+## Travel preferences
+- **Walking-first** — David & Ira prefer exploring cities on foot. Long walks across neighborhoods are part of the experience, not just transit.
+- **Active exploration** — fits their fitness-oriented lifestyle; walking 1.5+ hours to a destination is normal and enjoyable.
+
 ## Entertainment preferences
 - **Two watching modes**: solo (less frequent — actively limits solo screen time) and with Ira (more frequent)
 - Struggles with pure sci-fi — hard to suspend disbelief when it gets too out-there

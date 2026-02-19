@@ -11,17 +11,29 @@ David's personal knowledge base and life operating system. The AI assistant orga
 - Detail files hold specific content → loaded only when needed
 
 **Retrieval protocol (mandatory for every non-trivial message):**
-1. **Extract search terms** — be exhaustive. Pull out every name, topic keyword, and descriptive phrase from the message. Mix keywords (exact matches) and phrases (semantic matches, e.g. "conflicting feelings about work"). Don't artificially limit — a dense message might need 8 terms, a simple one might need 2.
-2. **Run kb-search** — for simple queries (1-2 topics): `./kb-search "Tom" "work tension"`. For complex multi-topic queries: spin up a sub-agent per distinct topic direction, each running its own focused search and reading relevant files. This parallelizes and gives each topic full attention.
-3. **Review results** — the full chunk text in the output IS your context. In most cases this is enough.
-4. **Read files only if needed** — only when you need broader context beyond what the chunks showed (e.g., a full person profile, a complete trip itinerary).
-5. **Verify before answering** — check: "am I using everything I know? Would this answer change if I loaded one more file?" If yes, go load it.
 
-After responding, if new information was shared:
-6. **Capture aggressively** — extract every distinct new fact, preference, feeling, update, or insight. Err on the side of saving too much. If it's specific to David's life, it belongs in the KB.
-7. **Search before writing** — for each fact/topic, run `./kb-search "keyword" "descriptive phrase"` to find semantically related content that already exists. Use this to decide: merge into existing section, update/reword existing text, delete outdated info, or create new section only if the topic is genuinely new.
-8. **Update markdown files** — apply the granular processing rules below. Reorganize, merge, and restructure aggressively when it makes content clearer.
-9. **Re-index** — `./kb-index` (only needed if files were modified)
+The main agent is a **coordinator** — it thinks, plans, and answers. It never searches or reads files itself. Instead it formulates questions and spins up **sub-agents** to do all the legwork. This is an agentic loop, not a linear checklist.
+
+**Phase 1: Plan**
+1. **Formulate questions** — ask yourself: what would I need to know to answer this perfectly? Think broadly. Relevant context could be: people involved and their personalities/preferences, David's own preferences and patterns, relevant history, current circumstances, emotional state, professional context, health context, or anything else. Each question becomes a task for a sub-agent. For simple messages (a quick fact or update), one question may be enough.
+
+**Phase 2: Research (loop until satisfied)**
+2. **Dispatch sub-agents in parallel** — one sub-agent per question/direction. Each sub-agent autonomously uses whatever tools fit its task:
+   - `./kb-search "keywords" "descriptive phrase"` — search David's knowledge base (primary tool; chunk text in output IS your context)
+   - Read files — browse the file tree, read `_index.md` files, load full profiles/documents
+   - Web search — current information, real-world facts, recommendations, prices, etc.
+   - Reasoning — some questions are answered by thinking, not searching
+   Each sub-agent returns a brief with its findings.
+3. **Evaluate: do I have enough?** — Review what came back. Ask: "Could my answer change if I knew one more thing?" If yes, formulate new questions based on what you've learned and loop back to step 2. If no, proceed.
+
+**Phase 3: Respond**
+4. **Answer with full context** — only when you're confident you have the complete picture.
+
+**After responding — capture new information:**
+5. **Capture aggressively** — extract every distinct new fact, preference, feeling, update, or insight. Err on the side of saving too much. If it's specific to David's life, it belongs in the KB.
+6. **Search before writing** — for each fact/topic, run `./kb-search "keyword" "descriptive phrase"` to find semantically related content that already exists. Use this to decide: merge into existing section, update/reword existing text, delete outdated info, or create new section only if the topic is genuinely new.
+7. **Update markdown files** — apply the granular processing rules below. Reorganize, merge, and restructure aggressively when it makes content clearer.
+8. **Re-index** — `./kb-index` (only needed if files were modified)
 
 Use the area index below and `_index.md` files in each folder to navigate. Use grep/glob liberally.
 
@@ -45,7 +57,7 @@ David's messages are dense — a single paragraph often contains multiple topics
 | Area | Path | Contents |
 |------|------|----------|
 | David | `david.md` | Full personal profile, traits, patterns, preferences |
-| People | `people.md` | Key relationships — girlfriend, family, friends, colleagues |
+| People | `people/` | Key relationships — girlfriend, family, friends, colleagues |
 | Work | `work/` | PetRadar, career history, professional topics |
 | Travel | `travel/` | Trips, planning, itineraries |
 | Entertainment | `entertainment/` | Watchlist, reading list, media preferences |
