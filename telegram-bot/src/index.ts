@@ -1,7 +1,9 @@
-import { Bot } from "grammy";
+import { Bot, Context } from "grammy";
 import { sendMessage } from "./claude";
 import { getSession, setSessionId, addCost } from "./sessions";
 import { splitMessage } from "./telegram";
+import { describeImage } from "./vision";
+import { transcribeAudio } from "./transcribe";
 
 // --- Config ---
 
@@ -71,20 +73,16 @@ bot.use((ctx, next) => {
   return next();
 });
 
-// --- Main message handler ---
+// --- Shared message handler ---
 
-bot.on("message:text", async (ctx) => {
-  const isAutoForward = ctx.msg.is_automatic_forward === true;
+async function handleMessage(ctx: Context, text: string): Promise<void> {
+  const isAutoForward = ctx.msg?.is_automatic_forward === true;
 
-  // Auto-forwarded = thread root (use message_id). Comments = thread child (use message_thread_id).
   const threadId = isAutoForward
-    ? ctx.msg.message_id
-    : ctx.msg.message_thread_id;
+    ? ctx.msg!.message_id
+    : ctx.msg!.message_thread_id;
 
-  // Ignore messages not in a thread and not auto-forwarded
   if (!threadId) return;
-
-  const text = ctx.msg.text;
 
   const mutex = getMutex(threadId);
   await mutex.acquire();
@@ -97,7 +95,7 @@ bot.on("message:text", async (ctx) => {
   // Typing indicator every 4s
   const typingInterval = setInterval(() => {
     ctx.api
-      .sendChatAction(ctx.chat.id, "typing", {
+      .sendChatAction(ctx.chat!.id, "typing", {
         message_thread_id: threadId,
       })
       .catch(() => {});
@@ -112,13 +110,12 @@ bot.on("message:text", async (ctx) => {
     progressTimer = null;
     if (placeholderDead || progressLines.length === 0) return;
     let body = progressLines.join("\n");
-    // Drop oldest lines to stay under Telegram's 4096 char limit
     while (body.length > 3800 && progressLines.length > 1) {
       progressLines.shift();
       body = "⋯ (earlier steps trimmed)\n" + progressLines.join("\n");
     }
     ctx.api
-      .editMessageText(ctx.chat.id, placeholder.message_id, body)
+      .editMessageText(ctx.chat!.id, placeholder.message_id, body)
       .catch((err: Error) => {
         const msg = err.message ?? "";
         if (
@@ -134,34 +131,28 @@ bot.on("message:text", async (ctx) => {
   function onProgress(line: string) {
     progressLines.push(line);
     if (!progressTimer) {
-      // First line: flush quickly so user sees immediate activity
       const delay = progressLines.length === 1 ? 300 : 1500;
       progressTimer = setTimeout(flushProgress, delay);
     }
   }
 
   try {
-    // Auto-forwarded = always fresh session. Comments = resume existing.
     const session = isAutoForward ? null : getSession(threadId);
     const result = await sendMessage(text, session?.session_id, onProgress);
 
-    // Store session
     setSessionId(threadId, result.sessionId);
     addCost(threadId, result.cost);
 
-    // Final flush of progress & delete placeholder
     if (progressTimer) clearTimeout(progressTimer);
     await ctx.api
-      .deleteMessage(ctx.chat.id, placeholder.message_id)
+      .deleteMessage(ctx.chat!.id, placeholder.message_id)
       .catch(() => {});
 
-    // Send response
     const parts = splitMessage(result.response || "(no response)");
     for (const part of parts) {
       await ctx.reply(part, replyOpts);
     }
 
-    // Notify about permission denials
     for (const denial of result.permissionDenials) {
       const inputStr =
         typeof denial.input === "object"
@@ -177,10 +168,9 @@ bot.on("message:text", async (ctx) => {
       `[thread:${threadId}] ${text.slice(0, 50)}... → $${result.cost.toFixed(4)}`
     );
   } catch (err) {
-    // Clean up progress timer & delete placeholder
     if (progressTimer) clearTimeout(progressTimer);
     await ctx.api
-      .deleteMessage(ctx.chat.id, placeholder.message_id)
+      .deleteMessage(ctx.chat!.id, placeholder.message_id)
       .catch(() => {});
 
     const errMsg = err instanceof Error ? err.message : String(err);
@@ -189,6 +179,117 @@ bot.on("message:text", async (ctx) => {
   } finally {
     clearInterval(typingInterval);
     mutex.release();
+  }
+}
+
+// --- Download file from Telegram ---
+
+async function downloadTelegramFile(fileId: string): Promise<Buffer> {
+  const file = await bot.api.getFile(fileId);
+  const url = `https://api.telegram.org/file/bot${BOT_TOKEN}/${file.file_path}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to download file: ${res.status}`);
+  return Buffer.from(await res.arrayBuffer());
+}
+
+// --- Process image and build prompt for Claude ---
+
+async function processImage(
+  ctx: Context,
+  fileId: string,
+  mimeType: string,
+  caption: string | undefined
+): Promise<void> {
+  const threadId = ctx.msg?.is_automatic_forward
+    ? ctx.msg.message_id
+    : ctx.msg?.message_thread_id;
+
+  if (!threadId) return;
+
+  // Show typing while analyzing image
+  ctx.api
+    .sendChatAction(ctx.chat!.id, "typing", { message_thread_id: threadId })
+    .catch(() => {});
+
+  try {
+    const buffer = await downloadTelegramFile(fileId);
+    const description = await describeImage(buffer, mimeType, caption || undefined);
+
+    const prompt = caption
+      ? `[User sent an image with caption: "${caption}"]\n\nImage description from vision analysis:\n${description}`
+      : `[User sent an image]\n\nImage description from vision analysis:\n${description}`;
+
+    await handleMessage(ctx, prompt);
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    await ctx.reply(`Error processing image: ${errMsg.slice(0, 1000)}`, {
+      reply_parameters: { message_id: threadId },
+    });
+    console.error(`[thread:${threadId}] Image error:`, err);
+  }
+}
+
+// --- Process audio and build prompt for Claude ---
+
+async function processAudio(
+  ctx: Context,
+  fileId: string,
+  filename: string
+): Promise<void> {
+  const threadId = ctx.msg?.is_automatic_forward
+    ? ctx.msg.message_id
+    : ctx.msg?.message_thread_id;
+
+  if (!threadId) return;
+
+  ctx.api
+    .sendChatAction(ctx.chat!.id, "typing", { message_thread_id: threadId })
+    .catch(() => {});
+
+  try {
+    const buffer = await downloadTelegramFile(fileId);
+    const transcription = await transcribeAudio(buffer, filename);
+
+    const prompt = `[User sent a voice/audio message]\n\nTranscription:\n${transcription}`;
+
+    await handleMessage(ctx, prompt);
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    await ctx.reply(`Error processing audio: ${errMsg.slice(0, 1000)}`, {
+      reply_parameters: { message_id: threadId },
+    });
+    console.error(`[thread:${threadId}] Audio error:`, err);
+  }
+}
+
+// --- Message handlers ---
+
+bot.on("message:text", (ctx) => handleMessage(ctx, ctx.msg.text));
+
+bot.on("message:photo", (ctx) => {
+  const photo = ctx.msg.photo;
+  const largest = photo[photo.length - 1];
+  return processImage(ctx, largest.file_id, "image/jpeg", ctx.msg.caption);
+});
+
+bot.on("message:voice", (ctx) => {
+  return processAudio(ctx, ctx.msg.voice.file_id, "voice.ogg");
+});
+
+bot.on("message:audio", (ctx) => {
+  const audio = ctx.msg.audio;
+  const ext = audio.mime_type?.split("/")[1] ?? "mp3";
+  return processAudio(ctx, audio.file_id, audio.file_name ?? `audio.${ext}`);
+});
+
+bot.on("message:document", (ctx) => {
+  const doc = ctx.msg.document;
+  const mime = doc.mime_type ?? "";
+  if (mime.startsWith("image/")) {
+    return processImage(ctx, doc.file_id, mime, ctx.msg.caption);
+  }
+  if (mime.startsWith("audio/") || mime === "video/ogg") {
+    return processAudio(ctx, doc.file_id, doc.file_name ?? "audio.ogg");
   }
 });
 

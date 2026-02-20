@@ -10,7 +10,8 @@
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.47",
     "better-sqlite3": "^11.8.1",
-    "grammy": "^1.35.0"
+    "grammy": "^1.35.0",
+    "openai": "^6.22.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
