@@ -2,7 +2,7 @@ import { Bot, Context } from "grammy";
 import { sendMessage } from "./claude";
 import { getSession, setSessionId, addCost } from "./sessions";
 import { splitMessage } from "./telegram";
-import { describeImage } from "./vision";
+import { describeImage, describeImages } from "./vision";
 import { transcribeAudio } from "./transcribe";
 
 // --- Config ---
@@ -192,6 +192,102 @@ async function downloadTelegramFile(fileId: string): Promise<Buffer> {
   return Buffer.from(await res.arrayBuffer());
 }
 
+// --- Media group batching ---
+
+interface MediaGroupEntry {
+  ctx: Context;
+  fileId: string;
+  mimeType: string;
+  caption?: string;
+}
+
+const mediaGroups = new Map<
+  string,
+  { entries: MediaGroupEntry[]; timer: ReturnType<typeof setTimeout> }
+>();
+
+const MEDIA_GROUP_WAIT_MS = 500;
+
+function handleMediaGroupPhoto(
+  mediaGroupId: string,
+  ctx: Context,
+  fileId: string,
+  mimeType: string,
+  caption: string | undefined
+): void {
+  let group = mediaGroups.get(mediaGroupId);
+  if (!group) {
+    group = {
+      entries: [],
+      timer: setTimeout(() => flushMediaGroup(mediaGroupId), MEDIA_GROUP_WAIT_MS),
+    };
+    mediaGroups.set(mediaGroupId, group);
+  } else {
+    clearTimeout(group.timer);
+    group.timer = setTimeout(
+      () => flushMediaGroup(mediaGroupId),
+      MEDIA_GROUP_WAIT_MS
+    );
+  }
+  group.entries.push({ ctx, fileId, mimeType, caption });
+}
+
+async function flushMediaGroup(mediaGroupId: string): Promise<void> {
+  const group = mediaGroups.get(mediaGroupId);
+  mediaGroups.delete(mediaGroupId);
+  if (!group || group.entries.length === 0) return;
+
+  // Use the first entry's ctx for sending the response
+  const firstEntry = group.entries[0];
+  const caption = group.entries.find((e) => e.caption)?.caption;
+
+  if (group.entries.length === 1) {
+    return processImage(
+      firstEntry.ctx,
+      firstEntry.fileId,
+      firstEntry.mimeType,
+      caption
+    );
+  }
+
+  const threadId = firstEntry.ctx.msg?.is_automatic_forward
+    ? firstEntry.ctx.msg.message_id
+    : firstEntry.ctx.msg?.message_thread_id;
+
+  if (!threadId) return;
+
+  firstEntry.ctx.api
+    .sendChatAction(firstEntry.ctx.chat!.id, "typing", {
+      message_thread_id: threadId,
+    })
+    .catch(() => {});
+
+  try {
+    const images = await Promise.all(
+      group.entries.map(async (e) => ({
+        buffer: await downloadTelegramFile(e.fileId),
+        mimeType: e.mimeType,
+      }))
+    );
+
+    const description = await describeImages(images, caption || undefined);
+    const count = group.entries.length;
+
+    const prompt = caption
+      ? `[User sent ${count} images with caption: "${caption}"]\n\nImage descriptions from vision analysis:\n${description}`
+      : `[User sent ${count} images]\n\nImage descriptions from vision analysis:\n${description}`;
+
+    await handleMessage(firstEntry.ctx, prompt);
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    await firstEntry.ctx.reply(
+      `Error processing images: ${errMsg.slice(0, 1000)}`,
+      { reply_parameters: { message_id: threadId } }
+    );
+    console.error(`[thread:${threadId}] Media group error:`, err);
+  }
+}
+
 // --- Process image and build prompt for Claude ---
 
 async function processImage(
@@ -269,6 +365,19 @@ bot.on("message:text", (ctx) => handleMessage(ctx, ctx.msg.text));
 bot.on("message:photo", (ctx) => {
   const photo = ctx.msg.photo;
   const largest = photo[photo.length - 1];
+  const mediaGroupId = ctx.msg.media_group_id;
+
+  if (mediaGroupId) {
+    handleMediaGroupPhoto(
+      mediaGroupId,
+      ctx,
+      largest.file_id,
+      "image/jpeg",
+      ctx.msg.caption
+    );
+    return;
+  }
+
   return processImage(ctx, largest.file_id, "image/jpeg", ctx.msg.caption);
 });
 
