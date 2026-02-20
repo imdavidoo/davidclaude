@@ -8,7 +8,7 @@ export async function transcribeAudio(
 ): Promise<string> {
   const file = await toFile(audioBuffer, filename);
   const result = await openai.audio.transcriptions.create({
-    model: "gpt-4o-mini-transcribe",
+    model: "gpt-4o-transcribe",
     file,
   });
   return result.text;
