@@ -38,7 +38,7 @@ def find_md_files():
         parts = rel.parts
         if any(part.startswith(".") for part in parts):
             continue
-        if parts[0] in ("tools",):
+        if parts[0] in ("tools", "node_modules", "telegram-bot"):
             continue
         if rel.name in SKIP_FILES:
             continue

@@ -62,6 +62,11 @@ function getMutex(threadId: number): Mutex {
 
 bot.use((ctx, next) => {
   if (ctx.chat?.id !== ALLOWED_CHAT_ID) return;
+  // Auto-forwarded channel posts: trust them (only channel admins can post)
+  if (ctx.msg?.is_automatic_forward) return next();
+  // Anonymous admin comments (posting as channel/group): only admins can do this
+  if (ctx.msg?.sender_chat?.id === ALLOWED_CHAT_ID) return next();
+  // Regular comments: check user ID
   if (!ALLOWED_USER_IDS.includes(ctx.from?.id ?? 0)) return;
   return next();
 });
@@ -69,22 +74,31 @@ bot.use((ctx, next) => {
 // --- Main message handler ---
 
 bot.on("message:text", async (ctx) => {
-  const threadId = ctx.msg.message_thread_id ?? 0;
+  const isAutoForward = ctx.msg.is_automatic_forward === true;
+
+  // Auto-forwarded = thread root (use message_id). Comments = thread child (use message_thread_id).
+  const threadId = isAutoForward
+    ? ctx.msg.message_id
+    : ctx.msg.message_thread_id;
+
+  // Ignore messages not in a thread and not auto-forwarded
+  if (!threadId) return;
+
   const text = ctx.msg.text;
 
   const mutex = getMutex(threadId);
   await mutex.acquire();
 
+  const replyOpts = { reply_parameters: { message_id: threadId } };
+
   // Send placeholder
-  const placeholder = await ctx.reply("...", {
-    message_thread_id: ctx.msg.message_thread_id,
-  });
+  const placeholder = await ctx.reply("...", replyOpts);
 
   // Typing indicator every 4s
   const typingInterval = setInterval(() => {
     ctx.api
       .sendChatAction(ctx.chat.id, "typing", {
-        message_thread_id: ctx.msg.message_thread_id,
+        message_thread_id: threadId,
       })
       .catch(() => {});
   }, 4000);
@@ -127,7 +141,8 @@ bot.on("message:text", async (ctx) => {
   }
 
   try {
-    const session = getSession(threadId);
+    // Auto-forwarded = always fresh session. Comments = resume existing.
+    const session = isAutoForward ? null : getSession(threadId);
     const result = await sendMessage(text, session?.session_id, onProgress);
 
     // Store session
@@ -143,9 +158,7 @@ bot.on("message:text", async (ctx) => {
     // Send response
     const parts = splitMessage(result.response || "(no response)");
     for (const part of parts) {
-      await ctx.reply(part, {
-        message_thread_id: ctx.msg.message_thread_id,
-      });
+      await ctx.reply(part, replyOpts);
     }
 
     // Notify about permission denials
@@ -156,10 +169,7 @@ bot.on("message:text", async (ctx) => {
           : String(denial.input);
       await ctx.reply(
         `⚠️ Permission denied: Claude tried to use \`${denial.toolName}(${inputStr})\` which is not in the allowlist.`,
-        {
-          message_thread_id: ctx.msg.message_thread_id,
-          parse_mode: "Markdown",
-        }
+        { ...replyOpts, parse_mode: "Markdown" }
       );
     }
 
@@ -174,9 +184,7 @@ bot.on("message:text", async (ctx) => {
       .catch(() => {});
 
     const errMsg = err instanceof Error ? err.message : String(err);
-    await ctx.reply(`Error: ${errMsg.slice(0, 1000)}`, {
-      message_thread_id: ctx.msg.message_thread_id,
-    });
+    await ctx.reply(`Error: ${errMsg.slice(0, 1000)}`, replyOpts);
     console.error(`[thread:${threadId}] Error:`, err);
   } finally {
     clearInterval(typingInterval);
