@@ -33,9 +33,50 @@ export interface ClaudeResult {
   permissionDenials: PermissionDenial[];
 }
 
+function formatToolUse(block: { name: string; input: Record<string, unknown> }): string {
+  const { name, input } = block;
+  switch (name) {
+    case "Bash": {
+      const cmd = String(input.command ?? "");
+      const kbMatch = cmd.match(/\.\/kb-search\s+"([^"]*)"(?:\s+"([^"]*)")?/);
+      if (kbMatch) return `🔍 KB search: "${kbMatch[2] ?? kbMatch[1]}"`;
+      if (cmd.includes("./kb-index")) return "📇 Re-indexing KB";
+      return `⚙️ Running: ${cmd.slice(0, 120)}`;
+    }
+    case "Read":
+      return `📄 Reading ${String(input.file_path ?? "")}`;
+    case "Task": {
+      const desc = String(input.description ?? "");
+      const prompt = String(input.prompt ?? "");
+      return `🤖 Agent: ${desc}\n   Task: ${prompt}`;
+    }
+    case "Grep":
+      return `🔎 Grep: "${String(input.pattern ?? "")}" in ${String(input.path ?? ".")}`;
+    case "Glob":
+      return `🔎 Glob: "${String(input.pattern ?? "")}" in ${String(input.path ?? ".")}`;
+    case "WebSearch":
+      return `🌐 Web search: "${String(input.query ?? "")}"`;
+    case "WebFetch":
+      return `🌐 Fetching: ${String(input.url ?? "")}`;
+    case "Write":
+      return `✏️ Writing ${String(input.file_path ?? "")}`;
+    case "Edit":
+      return `✏️ Editing ${String(input.file_path ?? "")}`;
+    default: {
+      const firstVal = Object.values(input)[0];
+      return `🔧 ${name}: ${String(firstVal ?? "").slice(0, 100)}`;
+    }
+  }
+}
+
+function truncate(s: string, max: number): string {
+  return s.length > max ? s.slice(0, max) + "…" : s;
+}
+
 export async function sendMessage(
   text: string,
-  sessionId?: string | null
+  sessionId?: string | null,
+  onProgress?: (line: string) => void
 ): Promise<ClaudeResult> {
   const response = query({
     prompt: text,
@@ -77,6 +118,44 @@ export async function sendMessage(
       } else {
         const errors = "errors" in message ? message.errors : [];
         result = `Error (${message.subtype}): ${(errors as string[]).join("\n") || "Unknown error"}`;
+      }
+    }
+
+    // Surface thinking + tool calls from assistant messages
+    if (onProgress && message.type === "assistant") {
+      const isTopLevel = message.parent_tool_use_id === null;
+      const msg = message.message as {
+        content?: Array<{
+          type: string;
+          text?: string;
+          name?: string;
+          input?: Record<string, unknown>;
+        }>;
+      };
+      for (const block of msg.content ?? []) {
+        // Show thinking/reasoning text (top-level only to avoid sub-agent noise)
+        if (block.type === "text" && block.text && isTopLevel) {
+          const text = block.text.trim();
+          if (text) onProgress(`💭 ${truncate(text, 300)}`);
+        }
+        // Show tool calls (top-level only)
+        if (block.type === "tool_use" && block.name && block.input && isTopLevel) {
+          onProgress(formatToolUse(block as { name: string; input: Record<string, unknown> }));
+        }
+      }
+    }
+
+    // Surface task lifecycle
+    if (onProgress && message.type === "system") {
+      if (message.subtype === "task_started") {
+        const m = message as { description?: string; task_id?: string };
+        onProgress(`🚀 Agent started: ${m.description ?? "task"}`);
+      }
+      if (message.subtype === "task_notification") {
+        const m = message as { status?: string; summary?: string; task_id?: string };
+        const icon = m.status === "completed" ? "✅" : "❌";
+        const summary = truncate(m.summary ?? "", 300);
+        onProgress(`${icon} Agent ${m.status ?? "done"}: ${summary}`);
       }
     }
 

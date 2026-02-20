@@ -89,15 +89,53 @@ bot.on("message:text", async (ctx) => {
       .catch(() => {});
   }, 4000);
 
+  // --- Live progress updates on placeholder ---
+  const progressLines: string[] = [];
+  let progressTimer: ReturnType<typeof setTimeout> | null = null;
+  let placeholderDead = false;
+
+  function flushProgress() {
+    progressTimer = null;
+    if (placeholderDead || progressLines.length === 0) return;
+    let body = progressLines.join("\n");
+    // Drop oldest lines to stay under Telegram's 4096 char limit
+    while (body.length > 3800 && progressLines.length > 1) {
+      progressLines.shift();
+      body = "⋯ (earlier steps trimmed)\n" + progressLines.join("\n");
+    }
+    ctx.api
+      .editMessageText(ctx.chat.id, placeholder.message_id, body)
+      .catch((err: Error) => {
+        const msg = err.message ?? "";
+        if (
+          msg.includes("message is not modified") ||
+          msg.includes("message to edit not found")
+        ) {
+          if (msg.includes("not found")) placeholderDead = true;
+          return;
+        }
+      });
+  }
+
+  function onProgress(line: string) {
+    progressLines.push(line);
+    if (!progressTimer) {
+      // First line: flush quickly so user sees immediate activity
+      const delay = progressLines.length === 1 ? 300 : 1500;
+      progressTimer = setTimeout(flushProgress, delay);
+    }
+  }
+
   try {
     const session = getSession(threadId);
-    const result = await sendMessage(text, session?.session_id);
+    const result = await sendMessage(text, session?.session_id, onProgress);
 
     // Store session
     setSessionId(threadId, result.sessionId);
     addCost(threadId, result.cost);
 
-    // Delete placeholder
+    // Final flush of progress & delete placeholder
+    if (progressTimer) clearTimeout(progressTimer);
     await ctx.api
       .deleteMessage(ctx.chat.id, placeholder.message_id)
       .catch(() => {});
@@ -129,7 +167,8 @@ bot.on("message:text", async (ctx) => {
       `[thread:${threadId}] ${text.slice(0, 50)}... → $${result.cost.toFixed(4)}`
     );
   } catch (err) {
-    // Delete placeholder
+    // Clean up progress timer & delete placeholder
+    if (progressTimer) clearTimeout(progressTimer);
     await ctx.api
       .deleteMessage(ctx.chat.id, placeholder.message_id)
       .catch(() => {});
