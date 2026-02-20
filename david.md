@@ -82,6 +82,10 @@ Childhood left him feeling out of control and in pain → developed a coping mec
 - Hobby: salsa dancing
 - **Adaptive zone**: consistent 40-100% beats pushing 130%. Hard pushing → extended recovery. Consistent showing up → better results. Applies to work and life too.
 
+## To buy (general — no rush)
+- Sandals — Teva-style, sturdy outdoor sandals
+- Barefoot shoes — versatile for everyday, running, and light water exposure (e.g. Vivobarefoot, Merrell Vapor Glove)
+
 ## Tools & gear
 - **Whoop** — wearable fitness/recovery tracker
 - **Charachorder** — alternative keyboard using chord-based typing. Built a custom chord library over ~3 weeks (Feb 2026). Much deeper and harder than expected. Believes it's the right long-term investment for a better computer interface, but also uncertain. Currently pausing to integrate it into daily use. Next phase: integration into actual workflow (post-Argentina).

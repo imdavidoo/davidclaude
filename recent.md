@@ -7,7 +7,7 @@
 - **Airbnb**: Santos Dumont 2470, Palermo.
 - **Transport**: SUBE card active.
 - **Have**: power adapter (Type I), blister plasters.
-- **Still need**: daypack, jogging pants, sunscreen. Walking to Decathlon Vicente López this morning (1.5 hr walk).
+- **Still need**: jogging pants, sunscreen. Walking to Decathlon Vicente López this morning (1.5 hr walk).
 - **Today's plan**: Decathlon → Ecoparque → Recoleta Cemetery → La Mezzetta pizza (Villa Ortúzar).
 - **Tomorrow AM**: morning run if energy, grab fruit/snacks for the flight, then Aeroparque by ~9:30.
 

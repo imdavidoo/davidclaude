@@ -97,7 +97,7 @@
 
 ## Buenos Aires To-Dos (on arrival)
 - [ ] Buy jogging pants
-- [ ] Buy daypack
+- [x] Buy daypack
 - [x] Buy power adapter (Type I — Type C same as NL, need Type I or universal)
 - [ ] Buy laundry detergent pods
 - [ ] Buy sunscreen

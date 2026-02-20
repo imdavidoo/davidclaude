@@ -15,5 +15,8 @@
   - *Frustration*: Feels like a mismatch in commitment. "I'm pushing so hard and you're just... not." David knows intellectually that Tom's stability might actually produce better results, but emotionally it's hard.
 - **Boundary set (Feb 2026)**: David told Tom his girlfriend keeps crashing their calls and that's not okay. Accepted Tom's need to be with his girlfriend but drew a line on work calls being interrupted.
 
+## To discuss
+- **AI-assisted refactoring workflow**: Use the full context window to ask AI for refactors — it discovers its own pain points naturally (like a human dev would), and can write tests from that same context
+
 ## History
 - Used to have long nights debating together — those were a lot of fun. The friendship predates the work relationship by many years.
