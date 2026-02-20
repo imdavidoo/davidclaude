@@ -48,16 +48,3 @@ export function addCost(threadId: number, cost: number): void {
   ).run(cost, String(threadId));
 }
 
-export function getCost(threadId: number): number {
-  const row = db
-    .prepare("SELECT total_cost FROM sessions WHERE thread_id = ?")
-    .get(String(threadId)) as { total_cost: number } | undefined;
-  return row?.total_cost ?? 0;
-}
-
-export function deleteSession(threadId: number): boolean {
-  const result = db
-    .prepare("DELETE FROM sessions WHERE thread_id = ?")
-    .run(String(threadId));
-  return result.changes > 0;
-}

@@ -1,12 +1,6 @@
 import { Bot } from "grammy";
 import { sendMessage } from "./claude";
-import {
-  getSession,
-  setSessionId,
-  deleteSession,
-  addCost,
-  getCost,
-} from "./sessions";
+import { getSession, setSessionId, addCost } from "./sessions";
 import { splitMessage } from "./telegram";
 
 // --- Config ---
@@ -70,24 +64,6 @@ bot.use((ctx, next) => {
   if (ctx.chat?.id !== ALLOWED_CHAT_ID) return;
   if (!ALLOWED_USER_IDS.includes(ctx.from?.id ?? 0)) return;
   return next();
-});
-
-// --- Commands ---
-
-bot.command("reset", async (ctx) => {
-  const threadId = ctx.msg.message_thread_id ?? 0;
-  const deleted = deleteSession(threadId);
-  await ctx.reply(deleted ? "Session cleared." : "No active session.", {
-    message_thread_id: ctx.msg.message_thread_id,
-  });
-});
-
-bot.command("cost", async (ctx) => {
-  const threadId = ctx.msg.message_thread_id ?? 0;
-  const cost = getCost(threadId);
-  await ctx.reply(`Session cost: $${cost.toFixed(4)}`, {
-    message_thread_id: ctx.msg.message_thread_id,
-  });
 });
 
 // --- Main message handler ---
