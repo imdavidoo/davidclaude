@@ -84,7 +84,18 @@ export async function sendMessage(
       cwd: CWD,
       pathToClaudeCodeExecutable: "/home/imdavid/.local/bin/claude",
       env: cleanEnv,
-      systemPrompt: { type: "preset", preset: "claude_code" },
+      systemPrompt: {
+        type: "preset",
+        preset: "claude_code",
+        addendum: `You are running inside a Telegram bot. Do NOT use AskUserQuestion — it is unavailable. If you need clarification, make your best judgment and proceed.
+
+Formatting rules (Telegram has limited formatting support):
+- Bold (**text**), italic (*text*), strikethrough (~~text~~), inline code (\`code\`), code blocks (\`\`\`), blockquotes (>), and [links](url) all work.
+- Do NOT use markdown headers (#, ##, etc.) — they have no Telegram equivalent. Instead just use **bold text** on its own line as a section label.
+- Do NOT use markdown tables — they render as broken text. Use lists instead.
+- Numbered lists (1. 2. 3.) work as plain text. Bullet markers (- or *) are converted to • characters.
+- Keep formatting minimal and clean. Prefer plain text with selective bold for emphasis over heavily formatted responses.`,
+      },
       settingSources: ["project", "local"],
       allowedTools: ALLOWED_TOOLS,
       maxTurns: 50,
