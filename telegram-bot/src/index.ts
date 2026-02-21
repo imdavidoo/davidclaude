@@ -1,9 +1,9 @@
 import { Bot, Context } from "grammy";
 import { sendMessage } from "./claude";
-import { getSession, setSessionId, addCost } from "./sessions";
-import { splitMessage } from "./telegram";
-import { describeImage, describeImages } from "./vision";
+import { getSession, setSessionId, addCost, isSeen, markSeen } from "./sessions";
+import { splitMessage, markdownToTelegramHtml } from "./telegram";
 import { transcribeAudio } from "./transcribe";
+import { writeFile, mkdir, rm } from "fs/promises";
 
 // --- Config ---
 
@@ -70,6 +70,18 @@ bot.use((ctx, next) => {
   if (ctx.msg?.sender_chat?.id === ALLOWED_CHAT_ID) return next();
   // Regular comments: check user ID
   if (!ALLOWED_USER_IDS.includes(ctx.from?.id ?? 0)) return;
+  return next();
+});
+
+// --- Dedup middleware (prevents crash-loop replays) ---
+
+bot.use((ctx, next) => {
+  const updateId = ctx.update.update_id;
+  if (isSeen(updateId)) {
+    console.log(`[dedup] Skipping already-seen update ${updateId}`);
+    return;
+  }
+  markSeen(updateId);
   return next();
 });
 
@@ -148,9 +160,17 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
       .deleteMessage(ctx.chat!.id, placeholder.message_id)
       .catch(() => {});
 
-    const parts = splitMessage(result.response || "(no response)");
+    const response = result.response || "(no response)";
+    const htmlResponse = markdownToTelegramHtml(response);
+    const parts = splitMessage(htmlResponse);
     for (const part of parts) {
-      await ctx.reply(part, replyOpts);
+      try {
+        await ctx.reply(part, { ...replyOpts, parse_mode: "HTML" });
+      } catch {
+        // HTML parse failed — strip tags and send as plain text
+        const plain = part.replace(/<[^>]+>/g, "");
+        await ctx.reply(plain || part, replyOpts);
+      }
     }
 
     for (const denial of result.permissionDenials) {
@@ -237,63 +257,40 @@ async function flushMediaGroup(mediaGroupId: string): Promise<void> {
   mediaGroups.delete(mediaGroupId);
   if (!group || group.entries.length === 0) return;
 
-  // Use the first entry's ctx for sending the response
   const firstEntry = group.entries[0];
   const caption = group.entries.find((e) => e.caption)?.caption;
+  const images = group.entries.map((e) => ({
+    fileId: e.fileId,
+    mimeType: e.mimeType,
+  }));
 
-  if (group.entries.length === 1) {
-    return processImage(
-      firstEntry.ctx,
-      firstEntry.fileId,
-      firstEntry.mimeType,
-      caption
-    );
-  }
-
-  const threadId = firstEntry.ctx.msg?.is_automatic_forward
-    ? firstEntry.ctx.msg.message_id
-    : firstEntry.ctx.msg?.message_thread_id;
-
-  if (!threadId) return;
-
-  firstEntry.ctx.api
-    .sendChatAction(firstEntry.ctx.chat!.id, "typing", {
-      message_thread_id: threadId,
-    })
-    .catch(() => {});
-
-  try {
-    const images = await Promise.all(
-      group.entries.map(async (e) => ({
-        buffer: await downloadTelegramFile(e.fileId),
-        mimeType: e.mimeType,
-      }))
-    );
-
-    const description = await describeImages(images, caption || undefined);
-    const count = group.entries.length;
-
-    const prompt = caption
-      ? `[User sent ${count} images with caption: "${caption}"]\n\nImage descriptions from vision analysis:\n${description}`
-      : `[User sent ${count} images]\n\nImage descriptions from vision analysis:\n${description}`;
-
-    await handleMessage(firstEntry.ctx, prompt);
-  } catch (err) {
-    const errMsg = err instanceof Error ? err.message : String(err);
-    await firstEntry.ctx.reply(
-      `Error processing images: ${errMsg.slice(0, 1000)}`,
-      { reply_parameters: { message_id: threadId } }
-    );
-    console.error(`[thread:${threadId}] Media group error:`, err);
-  }
+  return processImages(firstEntry.ctx, images, caption);
 }
 
-// --- Process image and build prompt for Claude ---
+// --- Save image to disk for Claude to read directly ---
+
+const UPLOAD_DIR = "/home/imdavid/davidclaude/uploads";
+
+async function saveImage(fileId: string, ext: string): Promise<string> {
+  await mkdir(UPLOAD_DIR, { recursive: true });
+  const path = `${UPLOAD_DIR}/${Date.now()}-${fileId.slice(-8)}.${ext}`;
+  const buffer = await downloadTelegramFile(fileId);
+  await writeFile(path, buffer);
+  return path;
+}
 
 async function processImage(
   ctx: Context,
   fileId: string,
   mimeType: string,
+  caption: string | undefined
+): Promise<void> {
+  return processImages(ctx, [{ fileId, mimeType }], caption);
+}
+
+async function processImages(
+  ctx: Context,
+  images: Array<{ fileId: string; mimeType: string }>,
   caption: string | undefined
 ): Promise<void> {
   const threadId = ctx.msg?.is_automatic_forward
@@ -302,18 +299,23 @@ async function processImage(
 
   if (!threadId) return;
 
-  // Show typing while analyzing image
-  ctx.api
-    .sendChatAction(ctx.chat!.id, "typing", { message_thread_id: threadId })
-    .catch(() => {});
+  const savedPaths: string[] = [];
 
   try {
-    const buffer = await downloadTelegramFile(fileId);
-    const description = await describeImage(buffer, mimeType, caption || undefined);
+    // Save all images to disk
+    for (const img of images) {
+      const ext = img.mimeType.split("/")[1] ?? "jpg";
+      const path = await saveImage(img.fileId, ext);
+      savedPaths.push(path);
+    }
+
+    const pathList = savedPaths.map((p) => `- ${p}`).join("\n");
+    const count = savedPaths.length;
+    const noun = count === 1 ? "an image" : `${count} images`;
 
     const prompt = caption
-      ? `[User sent an image with caption: "${caption}"]\n\nImage description from vision analysis:\n${description}`
-      : `[User sent an image]\n\nImage description from vision analysis:\n${description}`;
+      ? `[User sent ${noun} with caption: "${caption}"]\n\nImage files (use Read tool to view):\n${pathList}`
+      : `[User sent ${noun}]\n\nImage files (use Read tool to view):\n${pathList}`;
 
     await handleMessage(ctx, prompt);
   } catch (err) {
@@ -322,6 +324,11 @@ async function processImage(
       reply_parameters: { message_id: threadId },
     });
     console.error(`[thread:${threadId}] Image error:`, err);
+  } finally {
+    // Clean up saved files
+    for (const p of savedPaths) {
+      rm(p).catch(() => {});
+    }
   }
 }
 

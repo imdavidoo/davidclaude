@@ -20,6 +20,16 @@ db.exec(`
   )
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS seen_updates (
+    update_id INTEGER PRIMARY KEY,
+    seen_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )
+`);
+
+// Clean up entries older than 1 day on startup
+db.exec(`DELETE FROM seen_updates WHERE seen_at < datetime('now', '-1 day')`);
+
 interface Session {
   session_id: string;
   total_cost: number;
@@ -46,5 +56,13 @@ export function addCost(threadId: number, cost: number): void {
   db.prepare(
     "UPDATE sessions SET total_cost = total_cost + ? WHERE thread_id = ?"
   ).run(cost, String(threadId));
+}
+
+export function isSeen(updateId: number): boolean {
+  return !!db.prepare("SELECT 1 FROM seen_updates WHERE update_id = ?").get(updateId);
+}
+
+export function markSeen(updateId: number): void {
+  db.prepare("INSERT OR IGNORE INTO seen_updates (update_id) VALUES (?)").run(updateId);
 }
 
