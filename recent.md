@@ -1,15 +1,11 @@
 # Recent Memory
 
-## Current state (2026-02-19, Thursday)
-- **Last full day in Buenos Aires** — flying to El Calafate tomorrow.
-- **Tomorrow's flight**: JetSmart JA 3213, AEP dep 11:30 → FTE arr 14:47. Confirmation: 24423136135. Need to be at Aeroparque by ~9:30–10:00.
-- **Passengers**: David & Ira (the "3 guests" in booking was a display quirk).
-- **Airbnb**: Santos Dumont 2470, Palermo.
-- **Transport**: SUBE card active.
-- **Have**: power adapter (Type I), blister plasters.
-- **Still need**: jogging pants, sunscreen. Walking to Decathlon Vicente López this morning (1.5 hr walk).
-- **Today's plan**: Decathlon → Ecoparque → Recoleta Cemetery → La Mezzetta pizza (Villa Ortúzar).
-- **Tomorrow AM**: morning run if energy, grab fruit/snacks for the flight, then Aeroparque by ~9:30.
+## Current state (2026-02-20, Thursday)
+- **Arriving in El Calafate today** — JetSmart JA 3213, AEP 11:30 → FTE 14:47.
+- **Accommodation**: El Calafate hotel, check-in 14:00, check-out Feb 22 10:00.
+- **Full schedule now documented** in `travel/argentina-2026.md` with all bookings, flights, car rental, and meetings.
+- **Next**: El Chaltén Feb 22–27 (Nothofagus B&B), then back to Calafate Feb 27–28, then Bariloche Feb 28–Mar 7.
+- **Return flight**: Mar 10, EZE → AMS, dep 16:25.
 
 ## Active threads
 - **People & relationships overview** (2026-02-16): Created `people/` folder with per-person files. Key people documented: Ira, family (TBD), Tom, Fen, Philip, Shan. Created `work/career.md`. Room to flesh out family.

@@ -17,6 +17,7 @@
 
 ## To discuss
 - **AI-assisted refactoring workflow**: Use the full context window to ask AI for refactors — it discovers its own pain points naturally (like a human dev would), and can write tests from that same context
+- **Career direction: engineering vs business** — David's growing pull toward building technically hard products vs the business-heavy work at PetRadar. Where does Tom stand on this? How does it affect PetRadar's future and what comes after?
 
 ## History
 - Used to have long nights debating together — those were a lot of fun. The friendship predates the work relationship by many years.

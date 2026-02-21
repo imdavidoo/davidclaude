@@ -53,6 +53,9 @@ David's messages are dense — a single paragraph often contains multiple topics
 3. **Prune** — delete outdated/stale info (old dates, completed events, changed circumstances). When unsure, ask.
 4. **Work autonomously** — make structural changes, reorganize files, merge sections, restructure content without asking unless it's a major architectural shift. Use subagents for deep processing. Keep this root CLAUDE.md lean — move details to area files as they accumulate.
 
+## Response formatting
+- **No markdown tables** — David reads responses in Telegram where tables render poorly. Use lists or plain text instead.
+
 ## Infrastructure
 
 Telegram bot is managed by PM2 — use `pm2 restart davidclaude-bot` (not systemd).

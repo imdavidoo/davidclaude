@@ -7,7 +7,7 @@
 ## Core traits
 - **Builder mindset** — Loves progressing, creating, and building things (in work and life). Drawn to stories about building something from nothing.
 - **Achievement-driven** — Puts pressure on himself to perform and progress. Driven individual who genuinely enjoys achieving things — this won't go away, only the unhealthy overdrive needs to go.
-- **Founder energy** — Several years into PetRadar; entrepreneurial, hands-on. Title is CEO but day-to-day is mostly front-end coding and product development.
+- **Founder energy** — Several years into PetRadar; entrepreneurial, hands-on. Title is CEO but day-to-day is mostly front-end coding and product development. Increasingly drawn to engineering over business — wants to build things that are technically hard, not just operationally demanding.
 - **Practical thinker** — Prefers things that feel grounded and believable over abstract/fantastical.
 - **Autonomy-oriented** — Functions best when he can choose his own rhythm and move freely rather than depending on group schedules or rigid external structures.
 - **Skill-progression seeker** — Naturally drawn to activities with visible milestones that give novelty, mastery, and aliveness rather than just discipline.

@@ -13,7 +13,7 @@
 - [x] Warm fleece or mid-layer
 - [x] Hiking socks × 3
 - ~~Lightweight daypack~~ → buying in Buenos Aires
-- [x] Sunglasses
+- ~~Sunglasses~~ → lost on airplane, buy in Calafate
 - [x] Sunscreen (high SPF — Patagonia sun is strong)
 - [x] Hat/cap
 - [x] Buff/neck gaiter (wind protection in Patagonia)
@@ -101,6 +101,9 @@
 - [x] Buy power adapter (Type I — Type C same as NL, need Type I or universal)
 - [ ] Buy laundry detergent pods
 - [ ] Buy sunscreen
+
+## Calafate To-Dos
+- [ ] Buy new sunglasses (lost on airplane)
 
 ## NOT Packing (rent/buy locally)
 - Trekking poles — rent at each hiking destination
