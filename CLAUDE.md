@@ -12,28 +12,30 @@ David's personal knowledge base and life operating system. The AI assistant orga
 
 **Retrieval protocol (mandatory for every non-trivial message):**
 
-The main agent is a **coordinator** — it thinks, plans, and answers. It never searches or reads files itself. Instead it formulates questions and spins up **sub-agents** to do all the legwork. This is an agentic loop, not a linear checklist.
+The main agent is a **coordinator** — it thinks, plans, and answers. It never searches or reads files itself. Instead it extracts topics and spins up **separate sub-agents** to do all the legwork. Speed matters — maximize parallelism.
 
-**Phase 1: Plan**
-1. **Formulate questions** — ask yourself: what would I need to know to answer this perfectly? Think broadly. Relevant context could be: people involved and their personalities/preferences, David's own preferences and patterns, relevant history, current circumstances, emotional state, professional context, health context, or anything else. Each question becomes a task for a sub-agent. For simple messages (a quick fact or update), one question may be enough.
+**Phase 1: Extract threads**
+1. **Parse the message into distinct threads** — David's messages are often dense, touching many topics in one block. Decompose into separate threads: a thread about his girlfriend, a thread about work tension, a thread about career fantasies, etc. For simple messages (a quick fact or update), there may be just one thread.
 
-**Phase 2: Research (loop until satisfied)**
-2. **Dispatch sub-agents in parallel** — one sub-agent per question/direction. Each sub-agent autonomously uses whatever tools fit its task:
-   - `./kb-search "keywords" "descriptive phrase"` — search David's knowledge base (primary tool; chunk text in output IS your context)
-   - Read files — browse the file tree, read `_index.md` files, load full profiles/documents
-   - Web search — current information, real-world facts, recommendations, prices, etc.
-   - Reasoning — some questions are answered by thinking, not searching
-   Each sub-agent returns a brief with its findings.
-3. **Evaluate: do I have enough?** — Review what came back. Ask: "Could my answer change if I knew one more thing?" If yes, formulate new questions based on what you've learned and loop back to step 2. If no, proceed.
+**Phase 2: Research (parallel, then evaluate)**
+2. **Spin up one sub-agent per thread — as separate parallel Task calls.** This is critical: do NOT bundle all searches into one agent. Each sub-agent is a separate Task tool call so they execute concurrently. Each sub-agent gets:
+   - **The relevant excerpt** from David's message (the specific sentences/context for that thread — the agent needs this to understand what it's looking for and why)
+   - **A focused research directive** — what to search for, what files to read, what context to gather
+   - Available tools: `./kb-search "keywords" "descriptive phrase"`, file reads, web search, reasoning
+   - Instruction to return raw chunk text and findings (not summaries)
+3. **Evaluate: do I have enough?** — Review what came back. Ask: "Could my answer change if I knew one more thing?" If yes, spin up targeted follow-up agents. If no, proceed.
 
 **Phase 3: Respond**
 4. **Answer with full context** — only when you're confident you have the complete picture.
 
-**After responding — capture new information:**
-5. **Capture aggressively** — extract every distinct new fact, preference, feeling, update, or insight. Err on the side of saving too much. If it's specific to David's life, it belongs in the KB.
-6. **Search before writing** — for each fact/topic, run `./kb-search "keyword" "descriptive phrase"` to find semantically related content that already exists. Use this to decide: merge into existing section, update/reword existing text, delete outdated info, or create new section only if the topic is genuinely new.
-7. **Update markdown files** — apply the granular processing rules below. Reorganize, merge, and restructure aggressively when it makes content clearer.
-8. **Re-index** — `./kb-index` (only needed if files were modified)
+**After responding — capture new information (parallel, same pattern):**
+5. **Extract update topics** — parse every distinct new fact, preference, feeling, update, or insight from the message. Group them by topic (e.g., girlfriend updates, work updates, career reflections). Err on the side of saving too much.
+6. **Spin up one sub-agent per topic — as separate parallel Task calls.** Same principle as retrieval: do NOT bundle into one agent. Each sub-agent gets:
+   - **The specific new facts/updates** to capture for its topic
+   - **Instruction to search first** — run `./kb-search` to find existing content, then decide: merge, update, reword, delete outdated, or create new section
+   - **Instruction to write** — apply changes to the relevant markdown files, following the file writing rules below
+   - Each sub-agent handles its own search → decide → write cycle independently
+7. **Re-index** — `./kb-index` (only needed if files were modified)
 
 Use the area index below and `_index.md` files in each folder to navigate. Use grep/glob liberally.
 
