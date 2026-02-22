@@ -1,6 +1,6 @@
 import { Bot, Context } from "grammy";
 import { sendMessage } from "./claude";
-import { getSession, setSessionId, addCost, isSeen, markSeen } from "./sessions";
+import { getSession, setSessionId, isSeen, markSeen } from "./sessions";
 import { splitMessage, markdownToTelegramHtml } from "./telegram";
 import { transcribeAudio } from "./transcribe";
 import { writeFile, mkdir, rm } from "fs/promises";
@@ -153,7 +153,6 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
     const result = await sendMessage(text, session?.session_id, onProgress);
 
     setSessionId(threadId, result.sessionId);
-    addCost(threadId, result.cost);
 
     if (progressTimer) clearTimeout(progressTimer);
     await ctx.api

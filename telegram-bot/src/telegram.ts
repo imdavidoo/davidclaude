@@ -6,7 +6,7 @@ const HTML_ENTITIES: Record<string, string> = {
   ">": "&gt;",
 };
 
-export function escapeHtml(text: string): string {
+function escapeHtml(text: string): string {
   return text.replace(/[&<>]/g, (ch) => HTML_ENTITIES[ch]);
 }
 

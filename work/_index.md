@@ -4,7 +4,7 @@
 - **What**: Startup focused on reuniting missing pets
 - **Setup**: Remote team
 - **Role**: Co-founder & CEO — but day-to-day is mostly front-end coding and product development
-- **Co-founder**: Tom (see `people.md`)
+- **Co-founder**: Tom (see `people/tom.md`)
 - **Colleague**: Alex
 - **Duration**: Several years
 - **Background**: Commercial internet marketing; transitioning toward product and web development

@@ -87,7 +87,7 @@ export async function sendMessage(
       systemPrompt: {
         type: "preset",
         preset: "claude_code",
-        addendum: `You are running inside a Telegram bot. Do NOT use AskUserQuestion — it is unavailable. If you need clarification, make your best judgment and proceed.
+        append: `You are running inside a Telegram bot. Do NOT use AskUserQuestion — it is unavailable. If you need clarification, make your best judgment and proceed.
 
 Formatting rules (Telegram has limited formatting support):
 - Bold (**text**), italic (*text*), strikethrough (~~text~~), inline code (\`code\`), code blocks (\`\`\`), blockquotes (>), and [links](url) all work.
