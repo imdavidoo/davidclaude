@@ -73,6 +73,135 @@ function truncate(s: string, max: number): string {
   return s.length > max ? s.slice(0, max) + "…" : s;
 }
 
+// --- Context retrieval agent ---
+
+const RETRIEVAL_TOOLS = [
+  "Read",
+  "Glob",
+  "Grep",
+  "Bash(./kb-search *)",
+];
+
+const RETRIEVAL_SYSTEM_PROMPT = `You are a context retrieval agent for David's personal knowledge base. Your ONLY job is to find relevant context that would help respond to the user's message.
+
+The knowledge base is in the current working directory (/home/imdavid/davidclaude). Key directories:
+- people/ — relationship profiles (ira.md, tom.md, philip.md, family.md, etc.)
+- work/ — career, business ideas, discussions (career.md, business-ideas.md, tom-discussions.md)
+- growth/ — personal development (insights.md, techniques.md, daily-structure.md)
+- travel/ — trip planning (argentina-2026.md, etc.)
+- sports/ — fitness (exercises.md)
+- entertainment/ — watchlist, preferences
+- david.md — core personality profile
+- recent.md — current status and recent events
+
+How to search:
+- Run: ./kb-search "term1" "term2" "term3" — hybrid vector + keyword search across all KB files
+- Multiple terms in ONE search should be related to the same topic. Related terms boost each other — a chunk matching both "Tom" and "co-founder" scores higher than either alone.
+- Use SEPARATE searches for unrelated topics so they don't compete for result slots.
+- Examples:
+  - Message about working with Tom → ./kb-search "Tom" "career" "co-founder" (one search, related terms)
+  - Message about Tom AND a trip → ./kb-search "Tom" "career" then ./kb-search "Argentina" "travel" (two searches, separate topics)
+- You can also Read specific files directly if you know which one you need
+
+Steps:
+1. Identify the distinct topics/people/themes in the message
+2. Run 1 search per topic, using multiple related terms per search
+3. Read specific file sections if needed for more detail
+4. Return the relevant context formatted with section headers
+
+Do NOT use the Task tool. Do NOT spawn sub-agents. Do all searching yourself directly.
+
+If the message is trivial (greetings, "thanks", simple yes/no, acknowledgements) or doesn't need any KB context, respond with exactly: NONE
+
+Format each context block as:
+[filename.md ## Section Name]
+The relevant content...
+
+Keep it concise — only include what's genuinely useful, not entire files.`;
+
+export interface RetrievalResult {
+  context: string;
+  sections: string[];
+}
+
+export async function retrieveContext(
+  text: string,
+  alreadyLoaded: string[],
+  onProgress?: (line: string) => void
+): Promise<RetrievalResult> {
+  const loadedList =
+    alreadyLoaded.length > 0
+      ? alreadyLoaded.map((s) => `- ${s}`).join("\n")
+      : "Nothing yet";
+
+  const prompt = `User message: "${text}"
+
+Already loaded in this conversation:
+${loadedList}
+
+Find any NEW relevant context from the knowledge base. Skip sections already loaded.`;
+
+  const response = query({
+    prompt,
+    options: {
+      model: "claude-sonnet-4-6",
+      cwd: CWD,
+      pathToClaudeCodeExecutable: "/home/imdavid/.local/bin/claude",
+      env: cleanEnv,
+      systemPrompt: RETRIEVAL_SYSTEM_PROMPT,
+      allowedTools: RETRIEVAL_TOOLS,
+      disallowedTools: ["Task", "Write", "Edit", "WebSearch", "WebFetch", "Bash(git *)"],
+      maxTurns: 8,
+      settingSources: ["project", "local"],
+    },
+  });
+
+  let result = "";
+
+  for await (const message of response) {
+    if (message.type === "result") {
+      if (message.subtype === "success") {
+        result = message.result;
+      }
+    }
+
+    // Forward progress events
+    if (onProgress && message.type === "assistant") {
+      const isTopLevel = message.parent_tool_use_id === null;
+      const msg = message.message as {
+        content?: Array<{
+          type: string;
+          name?: string;
+          input?: Record<string, unknown>;
+        }>;
+      };
+      for (const block of msg.content ?? []) {
+        if (block.type === "tool_use" && block.name && block.input && isTopLevel) {
+          onProgress(formatToolUse(block as { name: string; input: Record<string, unknown> }));
+        }
+      }
+    }
+  }
+
+  // Parse result
+  const trimmed = result.trim();
+  if (!trimmed || trimmed === "NONE") {
+    return { context: "", sections: [] };
+  }
+
+  // Extract section labels from [file.md ## Section] headers
+  const sectionPattern = /^\[([^\]]+)\]\s*$/gm;
+  const sections: string[] = [];
+  let match;
+  while ((match = sectionPattern.exec(trimmed)) !== null) {
+    sections.push(match[1]);
+  }
+
+  return { context: trimmed, sections };
+}
+
+// --- Main agent ---
+
 export async function sendMessage(
   text: string,
   sessionId?: string | null,
