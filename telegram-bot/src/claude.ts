@@ -121,25 +121,17 @@ Keep it concise — only include what's genuinely useful, not entire files.`;
 
 export interface RetrievalResult {
   context: string;
-  sections: string[];
+  sessionId: string;
 }
 
 export async function retrieveContext(
   text: string,
-  alreadyLoaded: string[],
+  sessionId?: string | null,
   onProgress?: (line: string) => void
 ): Promise<RetrievalResult> {
-  const loadedList =
-    alreadyLoaded.length > 0
-      ? alreadyLoaded.map((s) => `- ${s}`).join("\n")
-      : "Nothing yet";
-
-  const prompt = `User message: "${text}"
-
-Already loaded in this conversation:
-${loadedList}
-
-Find any NEW relevant context from the knowledge base. Skip sections already loaded.`;
+  const prompt = sessionId
+    ? `New message from David: "${text}"\n\nSearch for any NEW relevant context not already covered in our previous retrieval. If nothing new is needed, respond with exactly: NONE`
+    : `User message: "${text}"\n\nFind relevant context from the knowledge base.`;
 
   const response = query({
     prompt,
@@ -153,12 +145,18 @@ Find any NEW relevant context from the knowledge base. Skip sections already loa
       disallowedTools: ["Task", "Write", "Edit", "WebSearch", "WebFetch", "Bash(git *)"],
       maxTurns: 8,
       settingSources: ["project", "local"],
+      ...(sessionId ? { resume: sessionId } : {}),
     },
   });
 
   let result = "";
+  let finalSessionId = "";
 
   for await (const message of response) {
+    if (message.type === "system" && message.subtype === "init") {
+      finalSessionId = message.session_id;
+    }
+
     if (message.type === "result") {
       if (message.subtype === "success") {
         result = message.result;
@@ -181,23 +179,18 @@ Find any NEW relevant context from the knowledge base. Skip sections already loa
         }
       }
     }
+
+    if (!finalSessionId && "session_id" in message && message.session_id) {
+      finalSessionId = message.session_id;
+    }
   }
 
-  // Parse result
   const trimmed = result.trim();
   if (!trimmed || trimmed === "NONE") {
-    return { context: "", sections: [] };
+    return { context: "", sessionId: finalSessionId };
   }
 
-  // Extract section labels from [file.md ## Section] headers
-  const sectionPattern = /^\[([^\]]+)\]\s*$/gm;
-  const sections: string[] = [];
-  let match;
-  while ((match = sectionPattern.exec(trimmed)) !== null) {
-    sections.push(match[1]);
-  }
-
-  return { context: trimmed, sections };
+  return { context: trimmed, sessionId: finalSessionId };
 }
 
 // --- Main agent ---
@@ -223,7 +216,11 @@ Formatting rules (Telegram has limited formatting support):
 - Do NOT use markdown headers (#, ##, etc.) — they have no Telegram equivalent. Instead just use **bold text** on its own line as a section label.
 - Do NOT use markdown tables — they render as broken text. Use lists instead.
 - Numbered lists (1. 2. 3.) work as plain text. Bullet markers (- or *) are converted to • characters.
-- Keep formatting minimal and clean. Prefer plain text with selective bold for emphasis over heavily formatted responses.`,
+- Keep formatting minimal and clean. Prefer plain text with selective bold for emphasis over heavily formatted responses.
+
+Context retrieval:
+- Relevant KB context has already been retrieved and included in the message under [Retrieved KB context]. Use this context to ground your response.
+- Do NOT search the KB again unless you specifically need something that wasn't covered by the pre-loaded context.`,
       },
       settingSources: ["project", "local"],
       allowedTools: ALLOWED_TOOLS,

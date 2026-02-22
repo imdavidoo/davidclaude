@@ -14,10 +14,18 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS sessions (
     thread_id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL,
+    retrieval_session_id TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     last_used_at TEXT NOT NULL DEFAULT (datetime('now'))
   )
 `);
+
+// Add retrieval_session_id column if missing (existing DBs)
+try {
+  db.exec(`ALTER TABLE sessions ADD COLUMN retrieval_session_id TEXT`);
+} catch {
+  // Column already exists
+}
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS seen_updates (
@@ -31,11 +39,12 @@ db.exec(`DELETE FROM seen_updates WHERE seen_at < datetime('now', '-1 day')`);
 
 interface Session {
   session_id: string;
+  retrieval_session_id: string | null;
 }
 
 export function getSession(threadId: number): Session | null {
   const row = db
-    .prepare("SELECT session_id FROM sessions WHERE thread_id = ?")
+    .prepare("SELECT session_id, retrieval_session_id FROM sessions WHERE thread_id = ?")
     .get(String(threadId)) as Session | undefined;
   return row ?? null;
 }
@@ -48,6 +57,12 @@ export function setSessionId(threadId: number, sessionId: string): void {
        session_id = excluded.session_id,
        last_used_at = datetime('now')`
   ).run(String(threadId), sessionId);
+}
+
+export function setRetrievalSessionId(threadId: number, retrievalSessionId: string): void {
+  db.prepare(
+    `UPDATE sessions SET retrieval_session_id = ? WHERE thread_id = ?`
+  ).run(retrievalSessionId, String(threadId));
 }
 
 export function isSeen(updateId: number): boolean {

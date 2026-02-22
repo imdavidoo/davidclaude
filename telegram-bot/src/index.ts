@@ -1,6 +1,6 @@
 import { Bot, Context } from "grammy";
 import { sendMessage, retrieveContext } from "./claude";
-import { getSession, setSessionId, isSeen, markSeen } from "./sessions";
+import { getSession, setSessionId, setRetrievalSessionId, isSeen, markSeen } from "./sessions";
 import { splitMessage, markdownToTelegramHtml } from "./telegram";
 import { transcribeAudio } from "./transcribe";
 import { writeFile, mkdir, rm } from "fs/promises";
@@ -51,8 +51,6 @@ class Mutex {
 
 const mutexes = new Map<number, Mutex>();
 
-// Per-thread tracking of KB sections already loaded by the retrieval agent
-const threadContext = new Map<number, string[]>();
 
 function getMutex(threadId: number): Mutex {
   let m = mutexes.get(threadId);
@@ -153,15 +151,17 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
 
   try {
     // --- Retrieve KB context before main agent ---
+    const session = isAutoForward ? null : getSession(threadId);
     let enrichedText = text;
     try {
       onProgress("📚 Retrieving context…");
-      const loaded = threadContext.get(threadId) ?? [];
-      const retrieval = await retrieveContext(text, loaded, onProgress);
+      const retrieval = await retrieveContext(text, session?.retrieval_session_id, onProgress);
+      if (retrieval.sessionId) {
+        setRetrievalSessionId(threadId, retrieval.sessionId);
+      }
       if (retrieval.context) {
         enrichedText = `[Retrieved KB context]\n${retrieval.context}\n\n[User message]\n${text}`;
-        threadContext.set(threadId, [...loaded, ...retrieval.sections]);
-        onProgress(`📚 Loaded ${retrieval.sections.length} context section(s)`);
+        onProgress("📚 Context loaded");
       } else {
         onProgress("📚 No additional context needed");
       }
@@ -170,7 +170,6 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
       // Continue without context — don't block the response
     }
 
-    const session = isAutoForward ? null : getSession(threadId);
     const result = await sendMessage(enrichedText, session?.session_id, onProgress);
 
     setSessionId(threadId, result.sessionId);
