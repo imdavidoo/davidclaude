@@ -146,10 +146,11 @@ How to search:
 - You can also Read specific files directly if you know which one you need
 
 Steps:
-1. Identify the distinct topics/people/themes in the message
-2. Run 1 search per topic, using multiple related terms per search
-3. Read specific file sections if needed for more detail
-4. Return the relevant context formatted with section headers
+1. Start by reading recent.md for current state and active threads. Include any relevant parts in your output.
+2. Identify the distinct topics/people/themes in the message
+3. Run 1 search per topic, using multiple related terms per search
+4. Read specific file sections if needed for more detail
+5. Return the relevant context formatted with section headers
 
 Do NOT use the Task tool. Do NOT spawn sub-agents. Do all searching yourself directly.
 
