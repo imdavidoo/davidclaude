@@ -131,7 +131,7 @@ const RETRIEVAL_TOOLS = [
 ];
 
 function buildRetrievalPrompt(kbStructure: string): string {
-  return `You are a context retrieval agent for David's personal knowledge base. Your ONLY job is to find relevant context that would help respond to the user's message.
+  return `You are a context retrieval agent for David's personal knowledge base. Your ONLY job is to find relevant background context that would help respond to the user's message. The user's message will already be sent to the main agent separately, so only return supporting KB context (who people are, relevant history, project details, etc.) — not information already in the message itself.
 
 The knowledge base is in the current working directory (${CWD}). Structure:
 ${kbStructure}
@@ -160,7 +160,7 @@ Format each context block as:
 [filename.md ## Section Name]
 The relevant content...
 
-Keep it concise — only include what's genuinely useful, not entire files.`;
+Keep it concise — only include what's genuinely useful, not entire files. Don't echo back or paraphrase the user's message.`;
 }
 
 export interface RetrievalResult {
