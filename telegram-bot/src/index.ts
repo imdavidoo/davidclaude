@@ -1,6 +1,6 @@
 import { Bot, Context } from "grammy";
-import { sendMessage, retrieveContext } from "./claude";
-import { getSession, setSessionId, setRetrievalSessionId, isSeen, markSeen } from "./sessions";
+import { sendMessage, retrieveContext, updateKnowledgeBase } from "./claude";
+import { getSession, setSessionId, setRetrievalSessionId, setUpdaterSessionId, isSeen, markSeen } from "./sessions";
 import { splitMessage, markdownToTelegramHtml } from "./telegram";
 import { transcribeAudio } from "./transcribe";
 import { writeFile, mkdir, rm } from "fs/promises";
@@ -61,6 +61,26 @@ function getMutex(threadId: number): Mutex {
   return m;
 }
 
+// --- Global KB updater (one at a time) ---
+
+const updaterMutex = new Mutex();
+
+function fireKBUpdate(text: string, threadId: number, sessionId?: string | null): void {
+  (async () => {
+    await updaterMutex.acquire();
+    try {
+      const result = await updateKnowledgeBase(text, sessionId);
+      if (result.sessionId) {
+        setUpdaterSessionId(threadId, result.sessionId);
+      }
+    } catch (err) {
+      console.error(`[updater:${threadId}] KB update failed:`, err);
+    } finally {
+      updaterMutex.release();
+    }
+  })();
+}
+
 // --- Security middleware ---
 
 bot.use((ctx, next) => {
@@ -96,6 +116,12 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
     : ctx.msg!.message_thread_id;
 
   if (!threadId) return;
+
+  // Fire-and-forget KB update (runs parallel with retrieval + main agent)
+  if (!isAutoForward) {
+    const session = getSession(threadId);
+    fireKBUpdate(text, threadId, session?.updater_session_id);
+  }
 
   const mutex = getMutex(threadId);
   await mutex.acquire();

@@ -1,4 +1,6 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
+import { readdir, readFile } from "fs/promises";
+import path from "path";
 
 const CWD = "/home/imdavid/davidclaude";
 
@@ -73,6 +75,52 @@ function truncate(s: string, max: number): string {
   return s.length > max ? s.slice(0, max) + "…" : s;
 }
 
+// --- Dynamic KB structure ---
+
+const EXCLUDED_DIRS = new Set([".git", ".venv", ".claude", ".kb-index", "node_modules", "uploads", "telegram-bot", "tools"]);
+
+async function getKBStructure(): Promise<string> {
+  const lines: string[] = [];
+
+  const entries = await readdir(CWD, { withFileTypes: true });
+
+  // Top-level .md files
+  const topFiles = entries
+    .filter((e) => e.isFile() && e.name.endsWith(".md"))
+    .map((e) => e.name)
+    .sort();
+  for (const f of topFiles) {
+    lines.push(`- ${f}`);
+  }
+
+  // Directories with .md files
+  const dirs = entries
+    .filter((e) => e.isDirectory() && !EXCLUDED_DIRS.has(e.name))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  for (const dir of dirs) {
+    const dirPath = path.join(CWD, dir.name);
+    let title = dir.name;
+    try {
+      const indexContent = await readFile(path.join(dirPath, "_index.md"), "utf-8");
+      const firstLine = indexContent.split("\n")[0];
+      const h1Match = firstLine.match(/^#\s+(.+)/);
+      if (h1Match) title = h1Match[1];
+    } catch {
+      // No _index.md, use directory name
+    }
+
+    const dirEntries = await readdir(dirPath);
+    const mdFiles = dirEntries
+      .filter((f) => f.endsWith(".md") && f !== "_index.md")
+      .sort();
+
+    lines.push(`- ${dir.name}/ — ${title} (${mdFiles.join(", ")})`);
+  }
+
+  return lines.join("\n");
+}
+
 // --- Context retrieval agent ---
 
 const RETRIEVAL_TOOLS = [
@@ -82,17 +130,11 @@ const RETRIEVAL_TOOLS = [
   "Bash(./kb-search *)",
 ];
 
-const RETRIEVAL_SYSTEM_PROMPT = `You are a context retrieval agent for David's personal knowledge base. Your ONLY job is to find relevant context that would help respond to the user's message.
+function buildRetrievalPrompt(kbStructure: string): string {
+  return `You are a context retrieval agent for David's personal knowledge base. Your ONLY job is to find relevant context that would help respond to the user's message.
 
-The knowledge base is in the current working directory (/home/imdavid/davidclaude). Key directories:
-- people/ — relationship profiles (ira.md, tom.md, philip.md, family.md, etc.)
-- work/ — career, business ideas, discussions (career.md, business-ideas.md, tom-discussions.md)
-- growth/ — personal development (insights.md, techniques.md, daily-structure.md)
-- travel/ — trip planning (argentina-2026.md, etc.)
-- sports/ — fitness (exercises.md)
-- entertainment/ — watchlist, preferences
-- david.md — core personality profile
-- recent.md — current status and recent events
+The knowledge base is in the current working directory (${CWD}). Structure:
+${kbStructure}
 
 How to search:
 - Run: ./kb-search "term1" "term2" "term3" — hybrid vector + keyword search across all KB files
@@ -118,6 +160,7 @@ Format each context block as:
 The relevant content...
 
 Keep it concise — only include what's genuinely useful, not entire files.`;
+}
 
 export interface RetrievalResult {
   context: string;
@@ -133,6 +176,8 @@ export async function retrieveContext(
     ? `New message from David: "${text}"\n\nSearch for any NEW relevant context not already covered in our previous retrieval. If nothing new is needed, respond with exactly: NONE`
     : `User message: "${text}"\n\nFind relevant context from the knowledge base.`;
 
+  const kbStructure = await getKBStructure();
+
   const response = query({
     prompt,
     options: {
@@ -140,7 +185,7 @@ export async function retrieveContext(
       cwd: CWD,
       pathToClaudeCodeExecutable: "/home/imdavid/.local/bin/claude",
       env: cleanEnv,
-      systemPrompt: RETRIEVAL_SYSTEM_PROMPT,
+      systemPrompt: buildRetrievalPrompt(kbStructure),
       allowedTools: RETRIEVAL_TOOLS,
       disallowedTools: ["Task", "Write", "Edit", "WebSearch", "WebFetch", "Bash(git *)"],
       maxTurns: 8,
@@ -191,6 +236,99 @@ export async function retrieveContext(
   }
 
   return { context: trimmed, sessionId: finalSessionId };
+}
+
+// --- KB Updater agent ---
+
+const UPDATER_TOOLS = [
+  "Read",
+  "Write",
+  "Edit",
+  "Glob",
+  "Grep",
+  "Bash(./kb-search *)",
+  "Bash(./kb-index)",
+  "Bash(./notify *)",
+  "Bash(mkdir *)",
+  "Bash(mv *)",
+  "Bash(ls *)",
+];
+
+function buildUpdaterPrompt(kbStructure: string): string {
+  return `You are a knowledge base curator for David's personal knowledge base. Your job is to extract key information from David's messages and persist it to the KB.
+
+The knowledge base is in the current working directory (${CWD}). Structure:
+${kbStructure}
+
+**How to search:**
+- Run: ./kb-search "term1" "term2" "term3" — hybrid vector + keyword search across all KB files
+- Multiple related terms in ONE search boost each other.
+- Use SEPARATE searches for unrelated topics.
+
+**Core principles:**
+- For each piece of new information: search the KB to find where related content already exists, then SCULPT AND POLISH the existing content rather than appending raw text
+- Only create new files/sections when the information genuinely doesn't belong anywhere existing
+- Actively restructure: create/rename directories, reorganize files, update _index.md files when the structure evolves
+- After any file changes, run \`./kb-index\` to keep the vector index fresh
+- After structural changes (moved/renamed files, new directories), run \`./notify "summary of what changed"\` to inform David via Telegram
+
+**What to persist:**
+- Facts about people, relationship dynamics, life updates
+- Plans, decisions, reflections, insights
+- Changed circumstances, new preferences
+- Project details, work developments
+
+**What NOT to persist:**
+- The bot's own suggestions/reflections/analysis (you only see David's messages, not the bot's responses)
+- Transient moods ("I'm tired"), trivial exchanges ("thanks", "ok")
+- Greetings, small talk, acknowledgements
+
+If nothing in the message is worth persisting, respond with exactly: NOTHING`;
+}
+
+export interface UpdaterResult {
+  sessionId: string;
+}
+
+export async function updateKnowledgeBase(
+  text: string,
+  sessionId?: string | null,
+): Promise<UpdaterResult> {
+  const prompt = sessionId
+    ? `David sent a new message: "${text}"\n\nExtract any key new information. You already know what was previously processed.`
+    : `David said: "${text}"\n\nExtract any key information worth persisting to the knowledge base.`;
+
+  const kbStructure = await getKBStructure();
+
+  const response = query({
+    prompt,
+    options: {
+      model: "claude-opus-4-6",
+      cwd: CWD,
+      pathToClaudeCodeExecutable: "/home/imdavid/.local/bin/claude",
+      env: cleanEnv,
+      systemPrompt: buildUpdaterPrompt(kbStructure),
+      allowedTools: UPDATER_TOOLS,
+      disallowedTools: ["Task", "WebSearch", "WebFetch"],
+      maxTurns: 30,
+      settingSources: ["project", "local"],
+      ...(sessionId ? { resume: sessionId } : {}),
+    },
+  });
+
+  let finalSessionId = "";
+
+  for await (const message of response) {
+    if (message.type === "system" && message.subtype === "init") {
+      finalSessionId = message.session_id;
+    }
+
+    if (!finalSessionId && "session_id" in message && message.session_id) {
+      finalSessionId = message.session_id;
+    }
+  }
+
+  return { sessionId: finalSessionId };
 }
 
 // --- Main agent ---
