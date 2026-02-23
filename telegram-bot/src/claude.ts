@@ -22,7 +22,15 @@ const ALLOWED_TOOLS = [
   "Bash(./kb-search *)",
   "Bash(./kb-index)",
   "Bash(./kb-recent *)",
+  "Bash(./notify *)",
   "Bash(git *)",
+  "Bash(mkdir *)",
+  "Bash(mv *)",
+  "Bash(ls *)",
+  "Bash(cat *)",
+  "Bash(head *)",
+  "Bash(tail *)",
+  "Bash(wc *)",
 ];
 
 export interface PermissionDenial {
@@ -382,27 +390,29 @@ export async function retrieveContext(
   // --- Step 2: Run searches in code + read recent/ daily files ---
   let allChunks: KBChunk[] = [];
 
-  // Always include recent daily files (last 7 days)
-  try {
-    const recentDir = path.join(CWD, "recent");
-    const recentFiles = await readdir(recentDir);
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - 7);
-    const cutoffStr = cutoff.toISOString().slice(0, 10);
+  // Include recent daily files only on first retrieval (they don't change between messages)
+  if (!filterSessionId) {
+    try {
+      const recentDir = path.join(CWD, "recent");
+      const recentFiles = await readdir(recentDir);
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - 7);
+      const cutoffStr = cutoff.toISOString().slice(0, 10);
 
-    const dateFiles = recentFiles
-      .filter(f => f !== "_index.md" && f.endsWith(".md") && /^\d{4}-\d{2}-\d{2}\.md$/.test(f))
-      .filter(f => f.slice(0, 10) >= cutoffStr)
-      .sort()
-      .reverse();
+      const dateFiles = recentFiles
+        .filter(f => f !== "_index.md" && f.endsWith(".md") && /^\d{4}-\d{2}-\d{2}\.md$/.test(f))
+        .filter(f => f.slice(0, 10) >= cutoffStr)
+        .sort()
+        .reverse();
 
-    for (const f of dateFiles) {
-      const content = await readFile(path.join(recentDir, f), "utf-8");
-      const chunks = splitMarkdownByH2(content, `recent/${f}`);
-      log(`recent/${f} → ${chunks.length} chunks: ${chunks.map(c => c.id).join(", ")}`);
-      allChunks.push(...chunks);
-    }
-  } catch { /* no recent/ directory */ }
+      for (const f of dateFiles) {
+        const content = await readFile(path.join(recentDir, f), "utf-8");
+        const chunks = splitMarkdownByH2(content, `recent/${f}`);
+        log(`recent/${f} → ${chunks.length} chunks: ${chunks.map(c => c.id).join(", ")}`);
+        allChunks.push(...chunks);
+      }
+    } catch { /* no recent/ directory */ }
+  }
 
   // Run each search query
   for (const q of queries) {
