@@ -50,6 +50,8 @@ function formatToolUse(block: { name: string; input: Record<string, unknown> }):
       if (cmd.includes("./kb-index")) return "📇 Re-indexing KB";
       if (cmd.includes("./kb-recent")) return "📅 Reading recent entries";
       if (cmd.includes("./notify")) return `📣 Notify: ${cmd.replace(/\.\/notify\s*/, "").slice(0, 120)}`;
+      if (cmd.startsWith("git commit")) return `📦 Committing changes`;
+      if (cmd.startsWith("git add")) return `📦 Staging files`;
       return `⚙️ ${cmd.slice(0, 120)}`;
     }
     case "Read":
@@ -517,6 +519,10 @@ const UPDATER_TOOLS = [
   "Bash(mkdir *)",
   "Bash(mv *)",
   "Bash(ls *)",
+  "Bash(git add *)",
+  "Bash(git commit *)",
+  "Bash(git status)",
+  "Bash(git diff *)",
 ];
 
 function buildUpdaterPrompt(kbStructure: string): string {
@@ -553,6 +559,13 @@ ${kbStructure}
 - The bot's own suggestions/reflections/analysis (you only see David's messages, not the bot's responses)
 - Transient moods ("I'm tired"), trivial exchanges ("thanks", "ok")
 - Greetings, small talk, acknowledgements
+
+**Committing changes:**
+- After making KB changes (and running \`./kb-index\`), commit ONLY the files you changed
+- Use \`git add <specific files>\` — never \`git add -A\` or \`git add .\`
+- Commit message format: \`KB: <short description of what changed>\`
+- Example: \`KB: Update Tom dynamics, add burnout insight\`
+- Do NOT commit files you didn't change. Other changes in the repo should be left alone.
 
 If nothing in the message is worth persisting, respond with exactly: NOTHING`;
 }
