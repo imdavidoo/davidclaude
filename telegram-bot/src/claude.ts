@@ -1,5 +1,6 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { readdir, readFile } from "fs/promises";
+import { execSync } from "child_process";
 import path from "path";
 
 const CWD = "/home/imdavid/davidclaude";
@@ -124,64 +125,182 @@ async function getKBStructure(): Promise<string> {
   return lines.join("\n");
 }
 
-// --- Context retrieval agent ---
+// --- Context retrieval (two-step: search planner + chunk filter) ---
 
-const RETRIEVAL_TOOLS = [
-  "Read",
-  "Glob",
-  "Grep",
-  "Bash(./kb-search *)",
-];
-
-function buildRetrievalPrompt(kbStructure: string): string {
-  return `You are a context retrieval agent for David's personal knowledge base. Your ONLY job is to find relevant background context that would help respond to the user's message. The user's message will already be sent to the main agent separately, so only return supporting KB context (who people are, relevant history, project details, etc.) — not information already in the message itself.
-
-The knowledge base is in the current working directory (${CWD}). Structure:
-${kbStructure}
-
-How to search:
-- Run: ./kb-search "term1" "term2" "term3" — hybrid vector + keyword search across all KB files
-- Multiple terms in ONE search should be related to the same topic. Related terms boost each other — a chunk matching both "Tom" and "co-founder" scores higher than either alone.
-- Use SEPARATE searches for unrelated topics so they don't compete for result slots.
-- Examples:
-  - Message about working with Tom → ./kb-search "Tom" "career" "co-founder" (one search, related terms)
-  - Message about Tom AND a trip → ./kb-search "Tom" "career" then ./kb-search "Argentina" "travel" (two searches, separate topics)
-- You can also Read specific files directly if you know which one you need
-
-Steps:
-1. Start by reading recent.md for current state and active threads. Include any relevant parts in your output.
-2. Identify the distinct topics/people/themes in the message
-3. Run 1 search per topic, using multiple related terms per search
-4. Read specific file sections if needed for more detail
-5. Return the relevant context formatted with section headers
-
-Do NOT use the Task tool. Do NOT spawn sub-agents. Do all searching yourself directly.
-
-If the message is trivial (greetings, "thanks", simple yes/no, acknowledgements) or doesn't need any KB context, respond with exactly: NONE
-
-Format each context block as:
-[filename.md ## Section Name]
-The relevant content...
-
-Keep it concise — only include what's genuinely useful, not entire files. Don't echo back or paraphrase the user's message.`;
+interface KBChunk {
+  id: string;       // "file.md §Section Name"
+  file: string;     // "file.md"
+  section: string;  // "Section Name"
+  content: string;  // raw text of the chunk
 }
+
+function parseKBSearchResults(output: string): KBChunk[] {
+  const chunks: KBChunk[] = [];
+  // Match chunk headers like: [1] work/_index.md §PetRadar [L3-L12] (keyword: ...)
+  const chunkPattern = /^\[(\d+)\]\s+(\S+\.md)\s+§(.+?)\s+\[L\d+-L\d+\]/gm;
+  let match;
+  const headers: Array<{ index: number; file: string; section: string; start: number }> = [];
+
+  while ((match = chunkPattern.exec(output)) !== null) {
+    headers.push({
+      index: Number(match[1]),
+      file: match[2],
+      section: match[3].trim(),
+      start: match.index + match[0].length,
+    });
+  }
+
+  for (let i = 0; i < headers.length; i++) {
+    const hdr = headers[i];
+    const end = i + 1 < headers.length ? headers[i + 1].start - (headers[i + 1].start - output.lastIndexOf("\n", headers[i + 1].start)) : output.length;
+    // Extract content between this header and the next
+    const rawBlock = output.slice(hdr.start, i + 1 < headers.length ? output.lastIndexOf(`[${headers[i + 1].index}]`, end) : output.length);
+    // Strip the "> " prefix from each line
+    const content = rawBlock
+      .split("\n")
+      .filter(l => l.startsWith("> ") || l === ">")
+      .map(l => l.startsWith("> ") ? l.slice(2) : "")
+      .join("\n")
+      .trim();
+
+    if (content) {
+      const id = `${hdr.file} §${hdr.section}`;
+      chunks.push({ id, file: hdr.file, section: hdr.section, content });
+    }
+  }
+
+  return chunks;
+}
+
+function splitMarkdownByH2(content: string, filename: string): KBChunk[] {
+  const chunks: KBChunk[] = [];
+  const lines = content.split("\n");
+  let currentSection = "(top)";
+  let currentLines: string[] = [];
+
+  for (const line of lines) {
+    const h2Match = line.match(/^##\s+(.+)/);
+    if (h2Match) {
+      // Flush previous section
+      const text = currentLines.join("\n").trim();
+      if (text) {
+        const id = `${filename} §${currentSection}`;
+        chunks.push({ id, file: filename, section: currentSection, content: text });
+      }
+      currentSection = h2Match[1].trim();
+      currentLines = [];
+    } else {
+      currentLines.push(line);
+    }
+  }
+  // Flush last section
+  const text = currentLines.join("\n").trim();
+  if (text) {
+    const id = `${filename} §${currentSection}`;
+    chunks.push({ id, file: filename, section: currentSection, content: text });
+  }
+  return chunks;
+}
+
+function runKBSearch(queryArgs: string): KBChunk[] {
+  try {
+    const output = execSync(`./kb-search ${queryArgs}`, {
+      cwd: CWD,
+      encoding: "utf-8",
+      timeout: 15000,
+    });
+    return parseKBSearchResults(output);
+  } catch {
+    return [];
+  }
+}
+
+function deduplicateChunks(chunks: KBChunk[]): KBChunk[] {
+  const seen = new Set<string>();
+  return chunks.filter(c => {
+    if (seen.has(c.id)) return false;
+    seen.add(c.id);
+    return true;
+  });
+}
+
+/**
+ * Re-read chunk content from the actual files on disk instead of using
+ * potentially stale content from the vector index. Drops chunks whose
+ * section no longer exists in the current file.
+ */
+async function resolveChunksFromDisk(chunks: KBChunk[]): Promise<KBChunk[]> {
+  // Group chunks by file so we only read each file once
+  const byFile = new Map<string, KBChunk[]>();
+  for (const c of chunks) {
+    const list = byFile.get(c.file) ?? [];
+    list.push(c);
+    byFile.set(c.file, list);
+  }
+
+  const resolved: KBChunk[] = [];
+
+  for (const [file, fileChunks] of byFile) {
+    let fileContent: string;
+    try {
+      fileContent = await readFile(path.join(CWD, file), "utf-8");
+    } catch {
+      // File no longer exists — skip all its chunks
+      continue;
+    }
+
+    // Split file into sections by H2
+    const diskSections = splitMarkdownByH2(fileContent, file);
+    const sectionMap = new Map(diskSections.map(s => [s.id, s]));
+
+    for (const chunk of fileChunks) {
+      const diskVersion = sectionMap.get(chunk.id);
+      if (diskVersion && diskVersion.content) {
+        resolved.push({ ...chunk, content: diskVersion.content });
+      }
+      // If section doesn't exist on disk anymore, silently drop it
+    }
+  }
+
+  return resolved;
+}
+
+const SEARCH_PLANNER_PROMPT = `You help find relevant background information for a user's message from his personal knowledge base. The KB is searched using: ./kb-search "term1" "term2" — a hybrid vector + keyword search. Related terms in one search boost each other; unrelated topics need separate searches.
+
+Given a message from David, think about what background context would be useful to have. What people, relationships, history, patterns, projects, or preferences are relevant? What are you curious about that might already be documented?
+
+Output one search query per line, formatted as kb-search arguments: "term1" "term2" "term3"
+If the message is trivial (greetings, "thanks", yes/no) or needs no background context, respond with exactly: NONE
+On follow-up messages: if existing context already covers this, respond with: NONE`;
+
+// TODO: Currently disabled — trying without chunk filtering first, using all search results directly.
+// Re-enable if context is too noisy for the main agent.
+const CHUNK_FILTER_PROMPT = `You select which knowledge base chunks are relevant to a user's message. You will be given numbered chunks and a user message. Respond with ONLY the chunk IDs that contain useful background context, one per line. If none are relevant, respond with: NONE
+
+Rules:
+- Select chunks that provide useful BACKGROUND context (who people are, history, existing patterns, preferences, etc.)
+- Do NOT select chunks just because they mention the same words — they must add genuinely useful context
+- Be selective — only include chunks that would meaningfully help a response`;
 
 export interface RetrievalResult {
   context: string;
-  sessionId: string;
+  plannerSessionId: string;
+  filterSessionId: string;
+  selectedChunks: Set<string>;
 }
 
-export async function retrieveContext(
-  text: string,
+// In-memory store for selected chunks per filter session
+const selectedChunksStore = new Map<string, Set<string>>();
+
+export function getSelectedChunks(filterSessionId: string): Set<string> {
+  return selectedChunksStore.get(filterSessionId) ?? new Set();
+}
+
+async function queryNoTools(
+  prompt: string,
+  systemPrompt: string,
   sessionId?: string | null,
-  onProgress?: (line: string) => void
-): Promise<RetrievalResult> {
-  const prompt = sessionId
-    ? `New message from David: "${text}"\n\nSearch for any NEW relevant context not already covered in our previous retrieval. If nothing new is needed, respond with exactly: NONE`
-    : `User message: "${text}"\n\nFind relevant context from the knowledge base.`;
-
-  const kbStructure = await getKBStructure();
-
+): Promise<{ result: string; sessionId: string }> {
   const response = query({
     prompt,
     options: {
@@ -189,10 +308,9 @@ export async function retrieveContext(
       cwd: CWD,
       pathToClaudeCodeExecutable: "/home/imdavid/.local/bin/claude",
       env: cleanEnv,
-      systemPrompt: buildRetrievalPrompt(kbStructure),
-      allowedTools: RETRIEVAL_TOOLS,
-      disallowedTools: ["Task", "Write", "Edit", "WebSearch", "WebFetch", "Bash(git *)"],
-      maxTurns: 8,
+      systemPrompt,
+      allowedTools: [],
+      maxTurns: 1,
       settingSources: ["project", "local"],
       ...(sessionId ? { resume: sessionId } : {}),
     },
@@ -205,41 +323,161 @@ export async function retrieveContext(
     if (message.type === "system" && message.subtype === "init") {
       finalSessionId = message.session_id;
     }
-
-    if (message.type === "result") {
-      if (message.subtype === "success") {
-        result = message.result;
-      }
+    if (message.type === "result" && message.subtype === "success") {
+      result = message.result;
     }
-
-    // Forward progress events
-    if (onProgress && message.type === "assistant") {
-      const isTopLevel = message.parent_tool_use_id === null;
-      const msg = message.message as {
-        content?: Array<{
-          type: string;
-          name?: string;
-          input?: Record<string, unknown>;
-        }>;
-      };
-      for (const block of msg.content ?? []) {
-        if (block.type === "tool_use" && block.name && block.input && isTopLevel) {
-          onProgress(formatToolUse(block as { name: string; input: Record<string, unknown> }));
-        }
-      }
-    }
-
     if (!finalSessionId && "session_id" in message && message.session_id) {
       finalSessionId = message.session_id;
     }
   }
 
-  const trimmed = result.trim();
-  if (!trimmed || trimmed === "NONE") {
-    return { context: "", sessionId: finalSessionId };
+  return { result: result.trim(), sessionId: finalSessionId };
+}
+
+export async function retrieveContext(
+  text: string,
+  plannerSessionId?: string | null,
+  filterSessionId?: string | null,
+  onProgress?: (line: string) => void
+): Promise<RetrievalResult> {
+  const log = (msg: string) => console.log(`[retrieval] ${msg}`);
+  const previouslySelected = filterSessionId ? getSelectedChunks(filterSessionId) : new Set<string>();
+  log(`Start — plannerSession=${plannerSessionId?.slice(0, 8) ?? "none"}, filterSession=${filterSessionId?.slice(0, 8) ?? "none"}, previouslySelected=${previouslySelected.size}`);
+
+  // --- Step 1: Ask planner for search queries ---
+  const plannerPrompt = plannerSessionId
+    ? `New message from David:\n"${text}"\n\nAre there significantly new topics that need KB searches? If existing context covers this, respond: NONE\nOtherwise, output search queries (one per line).`
+    : `Message from David:\n"${text}"\n\nWhat background context would be useful? Output search queries.`;
+
+  onProgress?.("🧠 Planning searches…");
+  const planResult = await queryNoTools(plannerPrompt, SEARCH_PLANNER_PROMPT, plannerSessionId);
+  const newPlannerSessionId = planResult.sessionId;
+  log(`Planner raw output:\n${planResult.result}`);
+
+  if (planResult.result === "NONE" || !planResult.result) {
+    log("Planner said NONE — skipping");
+    onProgress?.("📚 No new searches needed");
+    return { context: "", plannerSessionId: newPlannerSessionId, filterSessionId: filterSessionId ?? "", selectedChunks: previouslySelected };
   }
 
-  return { context: trimmed, sessionId: finalSessionId };
+  // Parse search queries from planner output
+  const queries = planResult.result
+    .split("\n")
+    .map(l => l.trim())
+    .filter(l => l && l !== "NONE" && l.includes('"'));
+
+  log(`Parsed ${queries.length} queries: ${JSON.stringify(queries)}`);
+  onProgress?.(`🔍 Running ${queries.length} search${queries.length > 1 ? "es" : ""}…`);
+
+  // --- Step 2: Run searches in code + read recent.md ---
+  let allChunks: KBChunk[] = [];
+
+  // Always include recent.md
+  try {
+    const recentContent = await readFile(path.join(CWD, "recent.md"), "utf-8");
+    const recentChunks = splitMarkdownByH2(recentContent, "recent.md");
+    log(`recent.md → ${recentChunks.length} chunks: ${recentChunks.map(c => c.id).join(", ")}`);
+    allChunks.push(...recentChunks);
+  } catch { /* no recent.md */ }
+
+  // Run each search query
+  for (const q of queries) {
+    onProgress?.(`🔍 KB search: ${q}`);
+    const results = runKBSearch(q);
+    log(`Search ${q} → ${results.length} chunks: ${results.map(c => c.id).join(", ")}`);
+    allChunks.push(...results);
+  }
+
+  log(`Total raw chunks before dedup: ${allChunks.length}`);
+
+  // Deduplicate and filter out already-selected chunks
+  allChunks = deduplicateChunks(allChunks);
+  log(`After dedup: ${allChunks.length}`);
+
+  // Re-read content from disk (index may be stale)
+  allChunks = await resolveChunksFromDisk(allChunks);
+  log(`After disk resolve: ${allChunks.length} (dropped ${allChunks.length === 0 ? "all" : ""} stale chunks)`);
+
+  const newChunks = allChunks.filter(c => !previouslySelected.has(c.id));
+  log(`After filtering previously-selected: ${newChunks.length} (removed ${allChunks.length - newChunks.length})`);
+
+  if (newChunks.length === 0) {
+    onProgress?.("📚 No new context found");
+    return { context: "", plannerSessionId: newPlannerSessionId, filterSessionId: filterSessionId ?? "", selectedChunks: previouslySelected };
+  }
+
+  // --- Step 3: Ask filter which chunks are relevant (separate session) ---
+  const chunkList = newChunks
+    .map(c => `[${c.id}]\n${c.content}`)
+    .join("\n\n---\n\n");
+
+  const filterPrompt = `User message:\n"${text}"\n\nChunks found (${newChunks.length} total):\n\n${chunkList}\n\nWhich chunk IDs are relevant? Respond with one ID per line (format: "file.md §Section Name"). If none, respond: NONE`;
+
+  log(`Sending ${newChunks.length} chunks to filter (IDs: ${newChunks.map(c => c.id).join(", ")})`);
+  onProgress?.(`🧠 Selecting from ${newChunks.length} chunks…`);
+  const filterResult = await queryNoTools(filterPrompt, CHUNK_FILTER_PROMPT, filterSessionId);
+  const newFilterSessionId = filterResult.sessionId;
+  log(`Filter raw output:\n${filterResult.result}`);
+
+  if (filterResult.result === "NONE" || !filterResult.result) {
+    log("Filter said NONE — no relevant context");
+    onProgress?.("📚 No relevant context found");
+    return { context: "", plannerSessionId: newPlannerSessionId, filterSessionId: newFilterSessionId, selectedChunks: previouslySelected };
+  }
+
+  // Parse selected IDs from filter output
+  const selectedLines = filterResult.result
+    .split("\n")
+    .map(l => l.trim())
+    .filter(l => l && l !== "NONE");
+
+  log(`Filter selected ${selectedLines.length} lines: ${JSON.stringify(selectedLines)}`);
+
+  // Match selected lines to actual chunks (fuzzy match on the ID)
+  const chunkMap = new Map(newChunks.map(c => [c.id, c]));
+  const selectedNow: KBChunk[] = [];
+
+  for (const line of selectedLines) {
+    // Try exact match first
+    if (chunkMap.has(line)) {
+      log(`  Exact match: "${line}"`);
+      selectedNow.push(chunkMap.get(line)!);
+      continue;
+    }
+    // Fuzzy: find chunk whose ID is contained in the line or vice versa
+    let matched = false;
+    for (const [id, chunk] of chunkMap) {
+      if (line.includes(id) || id.includes(line)) {
+        log(`  Fuzzy match: "${line}" → "${id}"`);
+        selectedNow.push(chunk);
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) {
+      log(`  NO MATCH for: "${line}"`);
+    }
+  }
+
+  log(`Final selected: ${selectedNow.length} chunks: ${selectedNow.map(c => c.id).join(", ")}`);
+
+  // Update selected chunks set
+  const updatedSelected = new Set(previouslySelected);
+  for (const c of selectedNow) {
+    updatedSelected.add(c.id);
+  }
+  selectedChunksStore.set(newFilterSessionId, updatedSelected);
+
+  // Assemble context from real chunk content
+  const context = selectedNow
+    .map(c => `[${c.file} ## ${c.section}]\n${c.content}`)
+    .join("\n\n---\n\n");
+
+  const files = [...new Set(selectedNow.map(c => c.file))];
+  log(`Context assembled: ${context.length} chars from ${files.join(", ")}`);
+  onProgress?.(`📚 Selected ${selectedNow.length}/${newChunks.length} chunks from ${files.join(", ")}`);
+
+  return { context, plannerSessionId: newPlannerSessionId, filterSessionId: newFilterSessionId, selectedChunks: updatedSelected };
 }
 
 // --- KB Updater agent ---

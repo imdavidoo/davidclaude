@@ -1,6 +1,6 @@
 import { Bot, Context } from "grammy";
 import { sendMessage, retrieveContext, updateKnowledgeBase } from "./claude";
-import { getSession, setSessionId, setRetrievalSessionId, setUpdaterSessionId, isSeen, markSeen } from "./sessions";
+import { getSession, setSessionId, setRetrievalSessionId, setFilterSessionId, setUpdaterSessionId, isSeen, markSeen } from "./sessions";
 import { splitMessage, markdownToTelegramHtml } from "./telegram";
 import { transcribeAudio } from "./transcribe";
 import { writeFile, mkdir, rm } from "fs/promises";
@@ -66,8 +66,11 @@ function getMutex(threadId: number): Mutex {
 const updaterMutex = new Mutex();
 
 function fireKBUpdate(ctx: Context, text: string, threadId: number, sessionId?: string | null): void {
+  console.log(`[updater:${threadId}] fireKBUpdate called`);
   (async () => {
+    console.log(`[updater:${threadId}] waiting for mutex...`);
     await updaterMutex.acquire();
+    console.log(`[updater:${threadId}] mutex acquired`);
 
     const replyOpts = { reply_parameters: { message_id: threadId } };
     let placeholder: { message_id: number } | null = null;
@@ -103,8 +106,10 @@ function fireKBUpdate(ctx: Context, text: string, threadId: number, sessionId?: 
 
     try {
       placeholder = await ctx.reply("📝 Updating knowledge base…", replyOpts);
+      console.log(`[updater:${threadId}] placeholder sent, calling updateKnowledgeBase...`);
 
       const result = await updateKnowledgeBase(text, sessionId, onUpdaterProgress);
+      console.log(`[updater:${threadId}] updateKnowledgeBase returned: result="${result.result?.slice(0, 100)}", sessionId=${result.sessionId?.slice(0, 8)}`);
       if (result.sessionId) {
         setUpdaterSessionId(threadId, result.sessionId);
       }
@@ -127,7 +132,7 @@ function fireKBUpdate(ctx: Context, text: string, threadId: number, sessionId?: 
       }
     } catch (err) {
       if (progressTimer) clearTimeout(progressTimer);
-      console.error(`[updater:${threadId}] KB update failed:`, err);
+      console.error(`[updater:${threadId}] KB update FAILED:`, err);
       const errMsg = err instanceof Error ? err.message : String(err);
       if (placeholder && !placeholderDead) {
         await ctx.api
@@ -240,20 +245,15 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
     let enrichedText = text;
     try {
       onProgress("── Retrieval ──");
-      const retrieval = await retrieveContext(text, session?.retrieval_session_id, onProgress);
-      if (retrieval.sessionId) {
-        setRetrievalSessionId(threadId, retrieval.sessionId);
+      const retrieval = await retrieveContext(text, session?.retrieval_session_id, session?.filter_session_id, onProgress);
+      if (retrieval.plannerSessionId) {
+        setRetrievalSessionId(threadId, retrieval.plannerSessionId);
+      }
+      if (retrieval.filterSessionId) {
+        setFilterSessionId(threadId, retrieval.filterSessionId);
       }
       if (retrieval.context) {
         enrichedText = `[Retrieved KB context]\n${retrieval.context}\n\n[User message]\n${text}`;
-        // Extract filenames from context headers like [filename.md ## Section]
-        const files = [...new Set(
-          Array.from(retrieval.context.matchAll(/\[([^\]]+\.md)(?:\s+##[^\]]*)?\]/g), m => m[1])
-        )];
-        const summary = files.length > 0 ? files.join(", ") : "context found";
-        onProgress(`📚 ${summary}`);
-      } else {
-        onProgress("📚 No context needed");
       }
     } catch (err) {
       console.error(`[thread:${threadId}] Retrieval failed:`, err);
