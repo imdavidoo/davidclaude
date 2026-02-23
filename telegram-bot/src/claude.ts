@@ -559,6 +559,7 @@ ${kbStructure}
 - The bot's own suggestions/reflections/analysis (you only see David's messages, not the bot's responses)
 - Transient moods ("I'm tired"), trivial exchanges ("thanks", "ok")
 - Greetings, small talk, acknowledgements
+- Anything the main assistant already handled (if a diff is provided, those changes are already done — don't redo them)
 
 **Committing changes:**
 - After making KB changes (and running \`./kb-index\`), commit ONLY the files you changed
@@ -578,11 +579,16 @@ export interface UpdaterResult {
 export async function updateKnowledgeBase(
   text: string,
   sessionId?: string | null,
-  onProgress?: (line: string) => void
+  onProgress?: (line: string) => void,
+  mainAgentDiff?: string | null
 ): Promise<UpdaterResult> {
+  const diffContext = mainAgentDiff
+    ? `\n\nThe main assistant already handled David's explicit request and made these file changes:\n\`\`\`diff\n${mainAgentDiff}\n\`\`\`\nDo NOT duplicate these changes. Focus on any additional implicit knowledge (facts about people, preferences, plans, relationship dynamics, etc.) that wasn't already captured above.`
+    : "";
+
   const prompt = sessionId
-    ? `David sent a new message: "${text}"\n\nExtract any key new information. You already know what was previously processed.`
-    : `David said: "${text}"\n\nExtract any key information worth persisting to the knowledge base.`;
+    ? `David sent a new message: "${text}"${diffContext}\n\nExtract any key new information. You already know what was previously processed.`
+    : `David said: "${text}"${diffContext}\n\nExtract any key information worth persisting to the knowledge base.`;
 
   const kbStructure = await getKBStructure();
 

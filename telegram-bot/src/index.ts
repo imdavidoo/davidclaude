@@ -4,6 +4,9 @@ import { getSession, setSessionId, setRetrievalSessionId, setFilterSessionId, se
 import { splitMessage, markdownToTelegramHtml } from "./telegram";
 import { transcribeAudio } from "./transcribe";
 import { writeFile, mkdir, rm } from "fs/promises";
+import { execSync } from "child_process";
+
+const CWD = "/home/imdavid/davidclaude";
 
 // --- Config ---
 
@@ -61,11 +64,11 @@ function getMutex(threadId: number): Mutex {
   return m;
 }
 
-// --- Global KB updater (one at a time) ---
+// --- Global KB updater (runs after main agent, one at a time) ---
 
 const updaterMutex = new Mutex();
 
-function fireKBUpdate(ctx: Context, text: string, threadId: number, sessionId?: string | null): void {
+function fireKBUpdate(ctx: Context, text: string, threadId: number, sessionId?: string | null, mainAgentDiff?: string | null): void {
   console.log(`[updater:${threadId}] fireKBUpdate called`);
   (async () => {
     console.log(`[updater:${threadId}] waiting for mutex...`);
@@ -108,7 +111,7 @@ function fireKBUpdate(ctx: Context, text: string, threadId: number, sessionId?: 
       placeholder = await ctx.reply("📝 Updating knowledge base…", replyOpts);
       console.log(`[updater:${threadId}] placeholder sent, calling updateKnowledgeBase...`);
 
-      const result = await updateKnowledgeBase(text, sessionId, onUpdaterProgress);
+      const result = await updateKnowledgeBase(text, sessionId, onUpdaterProgress, mainAgentDiff);
       console.log(`[updater:${threadId}] updateKnowledgeBase returned: result="${result.result?.slice(0, 100)}", sessionId=${result.sessionId?.slice(0, 8)}`);
       if (result.sessionId) {
         setUpdaterSessionId(threadId, result.sessionId);
@@ -180,10 +183,6 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
     : ctx.msg!.message_thread_id;
 
   if (!threadId) return;
-
-  // Fire-and-forget KB update (runs parallel with retrieval + main agent)
-  const kbSession = getSession(threadId);
-  fireKBUpdate(ctx, text, threadId, kbSession?.updater_session_id);
 
   const mutex = getMutex(threadId);
   await mutex.acquire();
@@ -258,10 +257,27 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
       onProgress("📚 Retrieval failed — continuing without context");
     }
 
+    // Snapshot HEAD before main agent so we can diff its changes later
+    let headBefore: string | null = null;
+    try {
+      headBefore = execSync("git rev-parse HEAD", { cwd: CWD, encoding: "utf-8", timeout: 5000 }).trim();
+    } catch { /* not a git repo or error — fine */ }
+
     onProgress("── Responding ──");
     const result = await sendMessage(enrichedText, session?.session_id, onProgress);
 
     setSessionId(threadId, result.sessionId);
+
+    // Diff everything the main agent changed (committed + uncommitted) against the pre-snapshot
+    let mainAgentDiff: string | null = null;
+    if (headBefore) {
+      try {
+        const diff = execSync(`git diff ${headBefore}`, { cwd: CWD, encoding: "utf-8", timeout: 5000 }).trim();
+        if (diff) mainAgentDiff = diff;
+      } catch { /* no diff or git error — fine */ }
+    }
+    const kbSession = getSession(threadId);
+    fireKBUpdate(ctx, text, threadId, kbSession?.updater_session_id, mainAgentDiff);
 
     if (progressTimer) clearTimeout(progressTimer);
     await ctx.api
