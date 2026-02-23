@@ -122,8 +122,8 @@ function fireKBUpdate(ctx: Context, text: string, threadId: number, sessionId?: 
           await ctx.api.deleteMessage(ctx.chat!.id, placeholder.message_id).catch(() => {});
         }
       } else {
-        // Show final summary
-        const summary = progressLines.join("\n") + "\n✅ KB update complete";
+        // Show final summary (agent's last text output, not the progress log)
+        const summary = `✅ ${result.result}`;
         if (placeholder && !placeholderDead) {
           await ctx.api
             .editMessageText(ctx.chat!.id, placeholder.message_id, summary.slice(0, 4000))
