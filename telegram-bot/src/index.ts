@@ -182,10 +182,8 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
   if (!threadId) return;
 
   // Fire-and-forget KB update (runs parallel with retrieval + main agent)
-  if (!isAutoForward) {
-    const session = getSession(threadId);
-    fireKBUpdate(ctx, text, threadId, session?.updater_session_id);
-  }
+  const kbSession = getSession(threadId);
+  fireKBUpdate(ctx, text, threadId, kbSession?.updater_session_id);
 
   const mutex = getMutex(threadId);
   await mutex.acquire();

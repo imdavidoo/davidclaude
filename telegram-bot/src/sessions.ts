@@ -77,20 +77,32 @@ export function setSessionId(threadId: number, sessionId: string): void {
 
 export function setRetrievalSessionId(threadId: number, retrievalSessionId: string): void {
   db.prepare(
-    `UPDATE sessions SET retrieval_session_id = ? WHERE thread_id = ?`
-  ).run(retrievalSessionId, String(threadId));
+    `INSERT INTO sessions (thread_id, session_id, retrieval_session_id)
+     VALUES (?, '', ?)
+     ON CONFLICT(thread_id) DO UPDATE SET
+       retrieval_session_id = excluded.retrieval_session_id,
+       last_used_at = datetime('now')`
+  ).run(String(threadId), retrievalSessionId);
 }
 
 export function setFilterSessionId(threadId: number, filterSessionId: string): void {
   db.prepare(
-    `UPDATE sessions SET filter_session_id = ? WHERE thread_id = ?`
-  ).run(filterSessionId, String(threadId));
+    `INSERT INTO sessions (thread_id, session_id, filter_session_id)
+     VALUES (?, '', ?)
+     ON CONFLICT(thread_id) DO UPDATE SET
+       filter_session_id = excluded.filter_session_id,
+       last_used_at = datetime('now')`
+  ).run(String(threadId), filterSessionId);
 }
 
 export function setUpdaterSessionId(threadId: number, updaterSessionId: string): void {
   db.prepare(
-    `UPDATE sessions SET updater_session_id = ? WHERE thread_id = ?`
-  ).run(updaterSessionId, String(threadId));
+    `INSERT INTO sessions (thread_id, session_id, updater_session_id)
+     VALUES (?, '', ?)
+     ON CONFLICT(thread_id) DO UPDATE SET
+       updater_session_id = excluded.updater_session_id,
+       last_used_at = datetime('now')`
+  ).run(String(threadId), updaterSessionId);
 }
 
 export function isSeen(updateId: number): boolean {
