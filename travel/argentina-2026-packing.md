@@ -50,6 +50,11 @@
 - [x] Small padlock (hostel lockers)
 - [x] Insect repellent / DEET (dengue active in BA)
 
+## Grocery Store Before Leaving
+- [ ] Blister plasters (if not already grabbed)
+- [ ] Carrot
+- [ ] Bread (maybe)
+
 ## Plane Food & Snacks
 - [ ] Sandwiches / wraps (for first flight)
 - [ ] Nuts / trail mix
