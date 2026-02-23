@@ -9,6 +9,10 @@ Three agents run per message (all in `telegram-bot/src/claude.ts`):
 2. **Retrieval** (sync) — searches KB for relevant context, injects it into the main agent's prompt as `[Retrieved KB context]`.
 3. **Main agent** — responds to the user with pre-loaded context.
 
+## Running the bot
+
+- Managed by pm2: `pm2 restart davidclaude-bot` to restart after code changes.
+
 ## Key tools
 
 - `./kb-search "term1" "term2"` — hybrid vector + keyword search. Related terms in one search boost each other; separate topics need separate searches.

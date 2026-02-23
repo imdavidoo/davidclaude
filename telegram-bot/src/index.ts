@@ -65,16 +65,75 @@ function getMutex(threadId: number): Mutex {
 
 const updaterMutex = new Mutex();
 
-function fireKBUpdate(text: string, threadId: number, sessionId?: string | null): void {
+function fireKBUpdate(ctx: Context, text: string, threadId: number, sessionId?: string | null): void {
   (async () => {
     await updaterMutex.acquire();
+
+    const replyOpts = { reply_parameters: { message_id: threadId } };
+    let placeholder: { message_id: number } | null = null;
+    const progressLines: string[] = ["📝 Updating knowledge base…"];
+    let progressTimer: ReturnType<typeof setTimeout> | null = null;
+    let placeholderDead = false;
+
+    function flushUpdaterProgress() {
+      progressTimer = null;
+      if (!placeholder || placeholderDead || progressLines.length === 0) return;
+      let body = progressLines.join("\n");
+      while (body.length > 3800 && progressLines.length > 1) {
+        progressLines.shift();
+        body = "⋯ (earlier steps trimmed)\n" + progressLines.join("\n");
+      }
+      ctx.api
+        .editMessageText(ctx.chat!.id, placeholder.message_id, body)
+        .catch((err: Error) => {
+          const msg = err.message ?? "";
+          if (msg.includes("message is not modified") || msg.includes("message to edit not found")) {
+            if (msg.includes("not found")) placeholderDead = true;
+            return;
+          }
+        });
+    }
+
+    function onUpdaterProgress(line: string) {
+      progressLines.push(line);
+      if (!progressTimer) {
+        progressTimer = setTimeout(flushUpdaterProgress, 1500);
+      }
+    }
+
     try {
-      const result = await updateKnowledgeBase(text, sessionId);
+      placeholder = await ctx.reply("📝 Updating knowledge base…", replyOpts);
+
+      const result = await updateKnowledgeBase(text, sessionId, onUpdaterProgress);
       if (result.sessionId) {
         setUpdaterSessionId(threadId, result.sessionId);
       }
+
+      if (progressTimer) clearTimeout(progressTimer);
+
+      // If nothing was persisted, delete the placeholder
+      if (!result.result || result.result === "NOTHING") {
+        if (placeholder) {
+          await ctx.api.deleteMessage(ctx.chat!.id, placeholder.message_id).catch(() => {});
+        }
+      } else {
+        // Show final summary
+        const summary = progressLines.join("\n") + "\n✅ KB update complete";
+        if (placeholder && !placeholderDead) {
+          await ctx.api
+            .editMessageText(ctx.chat!.id, placeholder.message_id, summary.slice(0, 4000))
+            .catch(() => {});
+        }
+      }
     } catch (err) {
+      if (progressTimer) clearTimeout(progressTimer);
       console.error(`[updater:${threadId}] KB update failed:`, err);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      if (placeholder && !placeholderDead) {
+        await ctx.api
+          .editMessageText(ctx.chat!.id, placeholder.message_id, `📝 KB update failed: ${errMsg.slice(0, 200)}`)
+          .catch(() => {});
+      }
     } finally {
       updaterMutex.release();
     }
@@ -120,7 +179,7 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
   // Fire-and-forget KB update (runs parallel with retrieval + main agent)
   if (!isAutoForward) {
     const session = getSession(threadId);
-    fireKBUpdate(text, threadId, session?.updater_session_id);
+    fireKBUpdate(ctx, text, threadId, session?.updater_session_id);
   }
 
   const mutex = getMutex(threadId);
@@ -180,22 +239,28 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
     const session = isAutoForward ? null : getSession(threadId);
     let enrichedText = text;
     try {
-      onProgress("📚 Retrieving context…");
+      onProgress("── Retrieval ──");
       const retrieval = await retrieveContext(text, session?.retrieval_session_id, onProgress);
       if (retrieval.sessionId) {
         setRetrievalSessionId(threadId, retrieval.sessionId);
       }
       if (retrieval.context) {
         enrichedText = `[Retrieved KB context]\n${retrieval.context}\n\n[User message]\n${text}`;
-        onProgress("📚 Context loaded");
+        // Extract filenames from context headers like [filename.md ## Section]
+        const files = [...new Set(
+          Array.from(retrieval.context.matchAll(/\[([^\]]+\.md)(?:\s+##[^\]]*)?\]/g), m => m[1])
+        )];
+        const summary = files.length > 0 ? files.join(", ") : "context found";
+        onProgress(`📚 ${summary}`);
       } else {
-        onProgress("📚 No additional context needed");
+        onProgress("📚 No context needed");
       }
     } catch (err) {
       console.error(`[thread:${threadId}] Retrieval failed:`, err);
-      // Continue without context — don't block the response
+      onProgress("📚 Retrieval failed — continuing without context");
     }
 
+    onProgress("── Responding ──");
     const result = await sendMessage(enrichedText, session?.session_id, onProgress);
 
     setSessionId(threadId, result.sessionId);
@@ -229,9 +294,7 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
       );
     }
 
-    console.log(
-      `[thread:${threadId}] ${text.slice(0, 50)}... → $${result.cost.toFixed(4)}`
-    );
+    console.log(`[thread:${threadId}] ${text.slice(0, 50)}...`);
   } catch (err) {
     if (progressTimer) clearTimeout(progressTimer);
     await ctx.api

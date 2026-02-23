@@ -31,8 +31,11 @@ export interface PermissionDenial {
 export interface ClaudeResult {
   response: string;
   sessionId: string;
-  cost: number;
   permissionDenials: PermissionDenial[];
+}
+
+function shortPath(p: string): string {
+  return p.startsWith(CWD + "/") ? p.slice(CWD.length + 1) : p;
 }
 
 function formatToolUse(block: { name: string; input: Record<string, unknown> }): string {
@@ -40,30 +43,30 @@ function formatToolUse(block: { name: string; input: Record<string, unknown> }):
   switch (name) {
     case "Bash": {
       const cmd = String(input.command ?? "");
-      const kbMatch = cmd.match(/\.\/kb-search\s+"([^"]*)"(?:\s+"([^"]*)")?/);
-      if (kbMatch) return `🔍 KB search: "${kbMatch[2] ?? kbMatch[1]}"`;
+      const kbMatch = cmd.match(/\.\/kb-search\s+(.+)/);
+      if (kbMatch) return `🔍 KB search: ${kbMatch[1]}`;
       if (cmd.includes("./kb-index")) return "📇 Re-indexing KB";
-      return `⚙️ Running: ${cmd.slice(0, 120)}`;
+      if (cmd.includes("./notify")) return `📣 Notify: ${cmd.replace(/\.\/notify\s*/, "").slice(0, 120)}`;
+      return `⚙️ ${cmd.slice(0, 120)}`;
     }
     case "Read":
-      return `📄 Reading ${String(input.file_path ?? "")}`;
+      return `📄 Read ${shortPath(String(input.file_path ?? ""))}`;
     case "Task": {
       const desc = String(input.description ?? "");
-      const prompt = String(input.prompt ?? "");
-      return `🤖 Agent: ${desc}\n   Task: ${prompt}`;
+      return `🤖 Agent: ${desc}`;
     }
     case "Grep":
-      return `🔎 Grep: "${String(input.pattern ?? "")}" in ${String(input.path ?? ".")}`;
+      return `🔎 Grep: "${String(input.pattern ?? "")}" in ${shortPath(String(input.path ?? "."))}`;
     case "Glob":
-      return `🔎 Glob: "${String(input.pattern ?? "")}" in ${String(input.path ?? ".")}`;
+      return `🔎 Glob: "${String(input.pattern ?? "")}" in ${shortPath(String(input.path ?? "."))}`;
     case "WebSearch":
-      return `🌐 Web search: "${String(input.query ?? "")}"`;
+      return `🌐 Search: "${String(input.query ?? "")}"`;
     case "WebFetch":
-      return `🌐 Fetching: ${String(input.url ?? "")}`;
+      return `🌐 Fetch: ${String(input.url ?? "")}`;
     case "Write":
-      return `✏️ Writing ${String(input.file_path ?? "")}`;
+      return `✏️ Write ${shortPath(String(input.file_path ?? ""))}`;
     case "Edit":
-      return `✏️ Editing ${String(input.file_path ?? "")}`;
+      return `✏️ Edit ${shortPath(String(input.file_path ?? ""))}`;
     default: {
       const firstVal = Object.values(input)[0];
       return `🔧 ${name}: ${String(firstVal ?? "").slice(0, 100)}`;
@@ -289,11 +292,13 @@ If nothing in the message is worth persisting, respond with exactly: NOTHING`;
 
 export interface UpdaterResult {
   sessionId: string;
+  result: string;
 }
 
 export async function updateKnowledgeBase(
   text: string,
   sessionId?: string | null,
+  onProgress?: (line: string) => void
 ): Promise<UpdaterResult> {
   const prompt = sessionId
     ? `David sent a new message: "${text}"\n\nExtract any key new information. You already know what was previously processed.`
@@ -318,10 +323,39 @@ export async function updateKnowledgeBase(
   });
 
   let finalSessionId = "";
+  let result = "";
 
   for await (const message of response) {
     if (message.type === "system" && message.subtype === "init") {
       finalSessionId = message.session_id;
+    }
+
+    if (message.type === "result") {
+      if (message.subtype === "success") {
+        result = message.result;
+      }
+    }
+
+    // Forward progress events
+    if (onProgress && message.type === "assistant") {
+      const isTopLevel = message.parent_tool_use_id === null;
+      const msg = message.message as {
+        content?: Array<{
+          type: string;
+          text?: string;
+          name?: string;
+          input?: Record<string, unknown>;
+        }>;
+      };
+      for (const block of msg.content ?? []) {
+        if (block.type === "text" && block.text && isTopLevel) {
+          const t = block.text.trim();
+          if (t) onProgress(`💭 ${truncate(t, 300)}`);
+        }
+        if (block.type === "tool_use" && block.name && block.input && isTopLevel) {
+          onProgress(formatToolUse(block as { name: string; input: Record<string, unknown> }));
+        }
+      }
     }
 
     if (!finalSessionId && "session_id" in message && message.session_id) {
@@ -329,7 +363,7 @@ export async function updateKnowledgeBase(
     }
   }
 
-  return { sessionId: finalSessionId };
+  return { sessionId: finalSessionId, result: result.trim() };
 }
 
 // --- Main agent ---
@@ -370,7 +404,6 @@ Context retrieval:
 
   let finalSessionId = "";
   let result = "";
-  let cost = 0;
   let permissionDenials: PermissionDenial[] = [];
 
   for await (const message of response) {
@@ -381,7 +414,6 @@ Context retrieval:
 
     // Capture result
     if (message.type === "result") {
-      cost = message.total_cost_usd;
       permissionDenials = (message.permission_denials ?? []).map(
         (d: { tool_name: string; tool_use_id: string; tool_input: unknown }) => ({
           toolName: d.tool_name,
@@ -441,5 +473,5 @@ Context retrieval:
     }
   }
 
-  return { response: result, sessionId: finalSessionId, cost, permissionDenials };
+  return { response: result, sessionId: finalSessionId, permissionDenials };
 }
