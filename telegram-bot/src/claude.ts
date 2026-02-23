@@ -21,6 +21,7 @@ const ALLOWED_TOOLS = [
   "WebFetch",
   "Bash(./kb-search *)",
   "Bash(./kb-index)",
+  "Bash(./kb-recent *)",
   "Bash(git *)",
 ];
 
@@ -47,6 +48,7 @@ function formatToolUse(block: { name: string; input: Record<string, unknown> }):
       const kbMatch = cmd.match(/\.\/kb-search\s+(.+)/);
       if (kbMatch) return `🔍 KB search: ${kbMatch[1]}`;
       if (cmd.includes("./kb-index")) return "📇 Re-indexing KB";
+      if (cmd.includes("./kb-recent")) return "📅 Reading recent entries";
       if (cmd.includes("./notify")) return `📣 Notify: ${cmd.replace(/\.\/notify\s*/, "").slice(0, 120)}`;
       return `⚙️ ${cmd.slice(0, 120)}`;
     }
@@ -119,7 +121,13 @@ async function getKBStructure(): Promise<string> {
       .filter((f) => f.endsWith(".md") && f !== "_index.md")
       .sort();
 
-    lines.push(`- ${dir.name}/ — ${title} (${mdFiles.join(", ")})`);
+    if (mdFiles.length > 10) {
+      const first = mdFiles[0];
+      const last = mdFiles[mdFiles.length - 1];
+      lines.push(`- ${dir.name}/ — ${title} (${mdFiles.length} files: ${first} … ${last})`);
+    } else {
+      lines.push(`- ${dir.name}/ — ${title} (${mdFiles.join(", ")})`);
+    }
   }
 
   return lines.join("\n");
@@ -369,16 +377,30 @@ export async function retrieveContext(
   log(`Parsed ${queries.length} queries: ${JSON.stringify(queries)}`);
   onProgress?.(`🔍 Running ${queries.length} search${queries.length > 1 ? "es" : ""}…`);
 
-  // --- Step 2: Run searches in code + read recent.md ---
+  // --- Step 2: Run searches in code + read recent/ daily files ---
   let allChunks: KBChunk[] = [];
 
-  // Always include recent.md
+  // Always include recent daily files (last 7 days)
   try {
-    const recentContent = await readFile(path.join(CWD, "recent.md"), "utf-8");
-    const recentChunks = splitMarkdownByH2(recentContent, "recent.md");
-    log(`recent.md → ${recentChunks.length} chunks: ${recentChunks.map(c => c.id).join(", ")}`);
-    allChunks.push(...recentChunks);
-  } catch { /* no recent.md */ }
+    const recentDir = path.join(CWD, "recent");
+    const recentFiles = await readdir(recentDir);
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 7);
+    const cutoffStr = cutoff.toISOString().slice(0, 10);
+
+    const dateFiles = recentFiles
+      .filter(f => f !== "_index.md" && f.endsWith(".md") && /^\d{4}-\d{2}-\d{2}\.md$/.test(f))
+      .filter(f => f.slice(0, 10) >= cutoffStr)
+      .sort()
+      .reverse();
+
+    for (const f of dateFiles) {
+      const content = await readFile(path.join(recentDir, f), "utf-8");
+      const chunks = splitMarkdownByH2(content, `recent/${f}`);
+      log(`recent/${f} → ${chunks.length} chunks: ${chunks.map(c => c.id).join(", ")}`);
+      allChunks.push(...chunks);
+    }
+  } catch { /* no recent/ directory */ }
 
   // Run each search query
   for (const q of queries) {
@@ -490,6 +512,7 @@ const UPDATER_TOOLS = [
   "Grep",
   "Bash(./kb-search *)",
   "Bash(./kb-index)",
+  "Bash(./kb-recent *)",
   "Bash(./notify *)",
   "Bash(mkdir *)",
   "Bash(mv *)",
@@ -513,6 +536,12 @@ ${kbStructure}
 - Actively restructure: create/rename directories, reorganize files, update _index.md files when the structure evolves
 - After any file changes, run \`./kb-index\` to keep the vector index fresh
 - After structural changes (moved/renamed files, new directories), run \`./notify "summary of what changed"\` to inform David via Telegram
+
+**Recent memory:**
+- Daily files live at \`recent/YYYY-MM-DD.md\` (use today's date: \`recent/${new Date().toISOString().slice(0, 10)}.md\`)
+- Read today's file before writing — sculpt and update existing content, don't duplicate
+- \`./kb-recent\` shows the last 7 days (or \`./kb-recent N\` for N days)
+- Old files age out naturally — no need to delete them
 
 **What to persist:**
 - Facts about people, relationship dynamics, life updates
