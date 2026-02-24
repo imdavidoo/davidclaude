@@ -49,6 +49,7 @@ Learnings David has identified about how he works best. These are hypotheses and
 - Strong signals = gentle cues for small adjustments, not extreme commands
 - Slowing down or listening inwardly sometimes triggers anxiety/emptiness/self-doubt — trusting internal signals is a work in progress
 - Often operates from a mode that pushes to perform and follow rules, instead of listening to actual needs
+- Patagonia discovery (Feb 2026): much of physical pain while hiking was actually mental — worry about future injury, not current damage. Pushing through made it less intense. A big part of perceived limitation is anticipatory worry, not real physical limit.
 
 ## The "50% > 0%" principle
 - Seed insight (Feb 2026): You don't have to be perfect to show up. Showing up at 50% beats staying home at 0%. Like being vegan but still eating bacon — imperfect action massively beats no action.
