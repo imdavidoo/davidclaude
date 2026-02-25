@@ -732,7 +732,8 @@ export async function updateKnowledgeBase(
 export async function sendMessage(
   text: string,
   sessionId?: string | null,
-  onProgress?: (line: string) => void
+  onProgress?: (line: string) => void,
+  channelPrompt?: string,
 ): Promise<ClaudeResult> {
   const response = query({
     prompt: text,
@@ -743,7 +744,7 @@ export async function sendMessage(
       systemPrompt: {
         type: "preset",
         preset: "claude_code",
-        append: `You are running inside a Telegram bot. Do NOT use AskUserQuestion — it is unavailable. If you need clarification, make your best judgment and proceed.
+        append: `${channelPrompt ? channelPrompt + "\n\n" : ""}You are running inside a Telegram bot. Do NOT use AskUserQuestion — it is unavailable. If you need clarification, make your best judgment and proceed.
 
 Formatting rules (Telegram has limited formatting support):
 - Bold (**text**), italic (*text*), strikethrough (~~text~~), inline code (\`code\`), code blocks (\`\`\`), blockquotes (>), and [links](url) all work.

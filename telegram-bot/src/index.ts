@@ -3,6 +3,7 @@ import { sendMessage, retrieveContext, updateKnowledgeBase, replyToUpdater } fro
 import { getSession, setSessionId, setRetrievalSessionId, setFilterSessionId, setUpdaterSessionId, isSeen, markSeen } from "./sessions";
 import { splitMessage, markdownToTelegramHtml } from "./telegram";
 import { transcribeAudio } from "./transcribe";
+import { getChannelConfig, getAllowedChatIds } from "./channels";
 import { writeFile, mkdir, rm } from "fs/promises";
 import { execSync } from "child_process";
 
@@ -11,7 +12,7 @@ const CWD = "/home/imdavid/davidclaude";
 // --- Config ---
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
-const ALLOWED_CHAT_ID = Number(process.env.ALLOWED_CHAT_ID);
+const ALLOWED_CHAT_IDS = getAllowedChatIds();
 const ALLOWED_USER_IDS = (process.env.ALLOWED_USER_IDS ?? "")
   .split(",")
   .map(Number)
@@ -19,10 +20,6 @@ const ALLOWED_USER_IDS = (process.env.ALLOWED_USER_IDS ?? "")
 
 if (!BOT_TOKEN) {
   console.error("BOT_TOKEN is required");
-  process.exit(1);
-}
-if (!ALLOWED_CHAT_ID) {
-  console.error("ALLOWED_CHAT_ID is required");
   process.exit(1);
 }
 
@@ -187,11 +184,12 @@ function fireKBUpdate(ctx: Context, text: string, threadId: number, sessionId?: 
 // --- Security middleware ---
 
 bot.use((ctx, next) => {
-  if (ctx.chat?.id !== ALLOWED_CHAT_ID) return;
+  const chatId = ctx.chat?.id;
+  if (!chatId || !ALLOWED_CHAT_IDS.has(chatId)) return;
   // Auto-forwarded channel posts: trust them (only channel admins can post)
   if (ctx.msg?.is_automatic_forward) return next();
   // Anonymous admin comments (posting as channel/group): only admins can do this
-  if (ctx.msg?.sender_chat?.id === ALLOWED_CHAT_ID) return next();
+  if (ctx.msg?.sender_chat?.id === chatId) return next();
   // Regular comments: check user ID
   if (!ALLOWED_USER_IDS.includes(ctx.from?.id ?? 0)) return;
   return next();
@@ -222,6 +220,10 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
     : ctx.msg!.message_thread_id;
 
   if (!threadId) return;
+
+  const channelConfig = getChannelConfig(ctx.chat!.id);
+  const skipRetrieval = flags.skipRetrieval || channelConfig?.enableRetrieval === false;
+  const skipKBUpdate = flags.skipKBUpdate || channelConfig?.enableKBUpdate === false;
 
   const mutex = getMutex(threadId);
   await mutex.acquire();
@@ -279,7 +281,7 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
     // --- Retrieve KB context before main agent ---
     const session = isAutoForward ? null : getSession(threadId);
     let enrichedText = text;
-    if (!flags.skipRetrieval) {
+    if (!skipRetrieval) {
       try {
         onProgress("── Retrieval ──");
         const retrieval = await retrieveContext(text, session?.retrieval_session_id, session?.filter_session_id, onProgress);
@@ -305,7 +307,7 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
     } catch { /* not a git repo or error — fine */ }
 
     onProgress("── Responding ──");
-    const result = await sendMessage(enrichedText, session?.session_id, onProgress);
+    const result = await sendMessage(enrichedText, session?.session_id, onProgress, channelConfig?.systemPrompt);
 
     setSessionId(threadId, result.sessionId);
 
@@ -317,7 +319,7 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
         if (diff) mainAgentDiff = diff;
       } catch { /* no diff or git error — fine */ }
     }
-    if (!flags.skipKBUpdate) {
+    if (!skipKBUpdate) {
       const kbSession = getSession(threadId);
       fireKBUpdate(ctx, text, threadId, kbSession?.updater_session_id, mainAgentDiff);
     }
