@@ -28,6 +28,34 @@ if (!ALLOWED_CHAT_ID) {
 
 const bot = new Bot(BOT_TOKEN);
 
+// --- Message flags (#q, #ns, #nkb) ---
+
+interface MessageFlags {
+  skipRetrieval: boolean;
+  skipKBUpdate: boolean;
+}
+
+function parseFlags(text: string): { cleaned: string; flags: MessageFlags } {
+  const flags: MessageFlags = { skipRetrieval: false, skipKBUpdate: false };
+  let cleaned = text;
+
+  if (/(?:^|\s)#q(?:\s|$)/i.test(cleaned)) {
+    flags.skipRetrieval = true;
+    flags.skipKBUpdate = true;
+    cleaned = cleaned.replace(/(?:^|\s)#q(?:\s|$)/i, " ");
+  }
+  if (/(?:^|\s)#ns(?:\s|$)/i.test(cleaned)) {
+    flags.skipRetrieval = true;
+    cleaned = cleaned.replace(/(?:^|\s)#ns(?:\s|$)/i, " ");
+  }
+  if (/(?:^|\s)#nkb(?:\s|$)/i.test(cleaned)) {
+    flags.skipKBUpdate = true;
+    cleaned = cleaned.replace(/(?:^|\s)#nkb(?:\s|$)/i, " ");
+  }
+
+  return { cleaned: cleaned.trim(), flags };
+}
+
 // --- Per-thread mutex ---
 
 class Mutex {
@@ -176,6 +204,9 @@ bot.use((ctx, next) => {
 // --- Shared message handler ---
 
 async function handleMessage(ctx: Context, text: string): Promise<void> {
+  const { cleaned, flags } = parseFlags(text);
+  text = cleaned;
+
   const isAutoForward = ctx.msg?.is_automatic_forward === true;
 
   const threadId = isAutoForward
@@ -240,21 +271,23 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
     // --- Retrieve KB context before main agent ---
     const session = isAutoForward ? null : getSession(threadId);
     let enrichedText = text;
-    try {
-      onProgress("── Retrieval ──");
-      const retrieval = await retrieveContext(text, session?.retrieval_session_id, session?.filter_session_id, onProgress);
-      if (retrieval.plannerSessionId) {
-        setRetrievalSessionId(threadId, retrieval.plannerSessionId);
+    if (!flags.skipRetrieval) {
+      try {
+        onProgress("── Retrieval ──");
+        const retrieval = await retrieveContext(text, session?.retrieval_session_id, session?.filter_session_id, onProgress);
+        if (retrieval.plannerSessionId) {
+          setRetrievalSessionId(threadId, retrieval.plannerSessionId);
+        }
+        if (retrieval.filterSessionId) {
+          setFilterSessionId(threadId, retrieval.filterSessionId);
+        }
+        if (retrieval.context) {
+          enrichedText = `[Retrieved KB context]\n${retrieval.context}\n\n[User message]\n${text}`;
+        }
+      } catch (err) {
+        console.error(`[thread:${threadId}] Retrieval failed:`, err);
+        onProgress("📚 Retrieval failed — continuing without context");
       }
-      if (retrieval.filterSessionId) {
-        setFilterSessionId(threadId, retrieval.filterSessionId);
-      }
-      if (retrieval.context) {
-        enrichedText = `[Retrieved KB context]\n${retrieval.context}\n\n[User message]\n${text}`;
-      }
-    } catch (err) {
-      console.error(`[thread:${threadId}] Retrieval failed:`, err);
-      onProgress("📚 Retrieval failed — continuing without context");
     }
 
     // Snapshot HEAD before main agent so we can diff its changes later
@@ -276,8 +309,10 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
         if (diff) mainAgentDiff = diff;
       } catch { /* no diff or git error — fine */ }
     }
-    const kbSession = getSession(threadId);
-    fireKBUpdate(ctx, text, threadId, kbSession?.updater_session_id, mainAgentDiff);
+    if (!flags.skipKBUpdate) {
+      const kbSession = getSession(threadId);
+      fireKBUpdate(ctx, text, threadId, kbSession?.updater_session_id, mainAgentDiff);
+    }
 
     if (progressTimer) clearTimeout(progressTimer);
     await ctx.api
