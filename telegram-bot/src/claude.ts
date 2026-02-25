@@ -322,7 +322,7 @@ async function queryNoTools(
   const response = query({
     prompt,
     options: {
-      model: "claude-sonnet-4-6",
+      model: "claude-haiku-4-5",
       cwd: CWD,
       pathToClaudeCodeExecutable: "/home/imdavid/.local/bin/claude",
       env: cleanEnv,
@@ -584,6 +584,71 @@ If nothing in the message is worth persisting, respond with exactly: NOTHING`;
 export interface UpdaterResult {
   sessionId: string;
   result: string;
+}
+
+export async function replyToUpdater(
+  text: string,
+  sessionId: string,
+  onProgress?: (line: string) => void,
+): Promise<UpdaterResult> {
+  const prompt = `David replies to your last KB update: "${text}"\n\nFollow his instruction.`;
+
+  const kbStructure = await getKBStructure();
+
+  const response = query({
+    prompt,
+    options: {
+      model: "claude-opus-4-6",
+      cwd: CWD,
+      pathToClaudeCodeExecutable: "/home/imdavid/.local/bin/claude",
+      env: cleanEnv,
+      systemPrompt: buildUpdaterPrompt(kbStructure),
+      allowedTools: UPDATER_TOOLS,
+      disallowedTools: ["Task", "WebSearch", "WebFetch"],
+      maxTurns: 30,
+      settingSources: ["project", "local"],
+      resume: sessionId,
+    },
+  });
+
+  let finalSessionId = "";
+  let result = "";
+
+  for await (const message of response) {
+    if (message.type === "system" && message.subtype === "init") {
+      finalSessionId = message.session_id;
+    }
+    if (message.type === "result") {
+      if (message.subtype === "success") {
+        result = message.result;
+      }
+    }
+    if (onProgress && message.type === "assistant") {
+      const isTopLevel = message.parent_tool_use_id === null;
+      const msg = message.message as {
+        content?: Array<{
+          type: string;
+          text?: string;
+          name?: string;
+          input?: Record<string, unknown>;
+        }>;
+      };
+      for (const block of msg.content ?? []) {
+        if (block.type === "text" && block.text && isTopLevel) {
+          const t = block.text.trim();
+          if (t) onProgress(`💭 ${truncate(t, 300)}`);
+        }
+        if (block.type === "tool_use" && block.name && block.input && isTopLevel) {
+          onProgress(formatToolUse(block as { name: string; input: Record<string, unknown> }));
+        }
+      }
+    }
+    if (!finalSessionId && "session_id" in message && message.session_id) {
+      finalSessionId = message.session_id;
+    }
+  }
+
+  return { sessionId: finalSessionId, result: result.trim() };
 }
 
 export async function updateKnowledgeBase(

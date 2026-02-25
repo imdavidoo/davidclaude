@@ -1,5 +1,5 @@
 import { Bot, Context } from "grammy";
-import { sendMessage, retrieveContext, updateKnowledgeBase } from "./claude";
+import { sendMessage, retrieveContext, updateKnowledgeBase, replyToUpdater } from "./claude";
 import { getSession, setSessionId, setRetrievalSessionId, setFilterSessionId, setUpdaterSessionId, isSeen, markSeen } from "./sessions";
 import { splitMessage, markdownToTelegramHtml } from "./telegram";
 import { transcribeAudio } from "./transcribe";
@@ -96,6 +96,9 @@ function getMutex(threadId: number): Mutex {
 
 const updaterMutex = new Mutex();
 
+// Maps updater status message IDs -> thread IDs for reply routing
+const updaterMessageIds = new Map<number, number>();
+
 function fireKBUpdate(ctx: Context, text: string, threadId: number, sessionId?: string | null, mainAgentDiff?: string | null): void {
   console.log(`[updater:${threadId}] fireKBUpdate called`);
   (async () => {
@@ -159,6 +162,11 @@ function fireKBUpdate(ctx: Context, text: string, threadId: number, sessionId?: 
           await ctx.api
             .editMessageText(ctx.chat!.id, placeholder.message_id, summary.slice(0, 4000))
             .catch(() => {});
+          // Register for reply routing
+          if (updaterMessageIds.size > 500) {
+            updaterMessageIds.delete(updaterMessageIds.keys().next().value!);
+          }
+          updaterMessageIds.set(placeholder.message_id, threadId);
         }
       }
     } catch (err) {
@@ -522,9 +530,104 @@ async function processAudio(
   }
 }
 
+// --- Updater reply handler ---
+
+async function handleUpdaterReply(ctx: Context, text: string, threadId: number): Promise<void> {
+  const session = getSession(threadId);
+  const updaterSessionId = session?.updater_session_id;
+
+  if (!updaterSessionId) {
+    return handleMessage(ctx, text);
+  }
+
+  console.log(`[updater-reply:${threadId}] acquiring mutex...`);
+  await updaterMutex.acquire();
+  console.log(`[updater-reply:${threadId}] mutex acquired`);
+
+  const replyOpts = { reply_parameters: { message_id: threadId } };
+  let placeholder: { message_id: number } | null = null;
+  const progressLines: string[] = ["📝 Updating knowledge base…"];
+  let progressTimer: ReturnType<typeof setTimeout> | null = null;
+  let placeholderDead = false;
+
+  function flushProgress() {
+    progressTimer = null;
+    if (!placeholder || placeholderDead || progressLines.length === 0) return;
+    let body = progressLines.join("\n");
+    while (body.length > 3800 && progressLines.length > 1) {
+      progressLines.shift();
+      body = "⋯ (earlier steps trimmed)\n" + progressLines.join("\n");
+    }
+    ctx.api
+      .editMessageText(ctx.chat!.id, placeholder.message_id, body)
+      .catch((err: Error) => {
+        const msg = err.message ?? "";
+        if (msg.includes("message is not modified") || msg.includes("message to edit not found")) {
+          if (msg.includes("not found")) placeholderDead = true;
+          return;
+        }
+      });
+  }
+
+  function onProgress(line: string) {
+    progressLines.push(line);
+    if (!progressTimer) {
+      progressTimer = setTimeout(flushProgress, 1500);
+    }
+  }
+
+  try {
+    placeholder = await ctx.reply("📝 Updating knowledge base…", replyOpts);
+
+    const result = await replyToUpdater(text, updaterSessionId, onProgress);
+
+    if (result.sessionId) {
+      setUpdaterSessionId(threadId, result.sessionId);
+    }
+
+    if (progressTimer) clearTimeout(progressTimer);
+
+    if (!result.result || result.result === "NOTHING") {
+      if (placeholder) {
+        await ctx.api.deleteMessage(ctx.chat!.id, placeholder.message_id).catch(() => {});
+      }
+    } else {
+      const summary = `✅ ${result.result}`;
+      if (placeholder && !placeholderDead) {
+        await ctx.api
+          .editMessageText(ctx.chat!.id, placeholder.message_id, summary.slice(0, 4000))
+          .catch(() => {});
+        // Register for further replies
+        if (updaterMessageIds.size > 500) {
+          updaterMessageIds.delete(updaterMessageIds.keys().next().value!);
+        }
+        updaterMessageIds.set(placeholder.message_id, threadId);
+      }
+    }
+  } catch (err) {
+    if (progressTimer) clearTimeout(progressTimer);
+    console.error(`[updater-reply:${threadId}] FAILED:`, err);
+    const errMsg = err instanceof Error ? err.message : String(err);
+    if (placeholder && !placeholderDead) {
+      await ctx.api
+        .editMessageText(ctx.chat!.id, placeholder.message_id, `📝 KB update failed: ${errMsg.slice(0, 200)}`)
+        .catch(() => {});
+    }
+  } finally {
+    updaterMutex.release();
+  }
+}
+
 // --- Message handlers ---
 
-bot.on("message:text", (ctx) => handleMessage(ctx, ctx.msg.text));
+bot.on("message:text", (ctx) => {
+  const replyToMsgId = ctx.msg.reply_to_message?.message_id;
+  if (replyToMsgId && updaterMessageIds.has(replyToMsgId)) {
+    const threadId = updaterMessageIds.get(replyToMsgId)!;
+    return handleUpdaterReply(ctx, ctx.msg.text, threadId);
+  }
+  return handleMessage(ctx, ctx.msg.text);
+});
 
 bot.on("message:photo", (ctx) => {
   const photo = ctx.msg.photo;
