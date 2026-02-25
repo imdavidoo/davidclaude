@@ -91,6 +91,7 @@ Childhood left him feeling out of control and in pain → developed a coping mec
 ## To buy (general — no rush)
 - Sandals — Teva-style, sturdy outdoor sandals
 - Barefoot shoes — versatile for everyday, running, and light water exposure (e.g. Vivobarefoot, Merrell Vapor Glove)
+- Waterproof barefoot running shoes
 - Daypack
 
 ## Tools & gear
