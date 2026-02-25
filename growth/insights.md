@@ -43,13 +43,23 @@ Learnings David has identified about how he works best. These are hypotheses and
 - Letting go of the pressure-driven 40% of effort and keeping the inspired 60% → still accomplishes most of what matters, but lighter and more alive
 - Already doing a lot. That is enough. Doesn't need to be perfect or control every outcome.
 
+## "Hank" — the inner critic
+Working on this with psychologist (Feb 2026). Named "Hank" for easy reference.
+- **What it is**: A strict, near-constant inner monologue telling David he's doing something wrong. Runs almost every moment — checking, judging, warning.
+- **Effect**: Creates constant background tension. Always feeling like he's failing or about to fail.
+- **Common patterns**: "I'm not strong enough", "I'll create an injury", "I'm limiting Ira", "I should be more careful", "This will go wrong in the future so I need to stop now"
+- **Key realization**: Hank doesn't just cause emotional suffering — he likely causes or amplifies *physical* pain and tension too. The worry itself generates the tightness, which generates the pain, which confirms the worry.
+- **The knee metaphor**: David had a knee injury caused by a shortened hip muscle (from sitting) that twisted his knee, making running impact painful. The fix wasn't to stop running — it was to fix the underlying muscle imbalance. Same with Hank: the solution isn't being more careful with life (less running, shorter hikes, avoiding headaches). The solution is addressing the underlying tension that Hank creates. Life's "impacts" only hurt because the base is already twisted.
+- **Working on**: Letting go of Hank. Noticing when the voice is active. Origin still being explored.
+
 ## Body & intuition
 - Listening to body signals is almost always right but currently difficult
 - Body and intuition are the healthiest guide, but fully following those signals can be overwhelming right now
 - Strong signals = gentle cues for small adjustments, not extreme commands
 - Slowing down or listening inwardly sometimes triggers anxiety/emptiness/self-doubt — trusting internal signals is a work in progress
 - Often operates from a mode that pushes to perform and follow rules, instead of listening to actual needs
-- Patagonia discovery (Feb 2026): much of physical pain while hiking was actually mental — worry about future injury, not current damage. Pushing through made it less intense. A big part of perceived limitation is anticipatory worry, not real physical limit.
+- **Patagonia discovery (Feb 2026)**: much of physical pain while hiking was actually mental — anticipatory worry about future injury, not current damage. Thought he could do ~15-20km but ended up doing 38-40km including trail running with significant elevation. The pain decreased when he committed to the route instead of worrying about it. Next day: sore but not injured at all. A big part of perceived limitation is Hank-generated worry, not real physical limit.
+- **Headache pattern**: woke up with headache → inner voice said "don't run, it'll make it worse" → realized those cautionary thoughts themselves create tension → when he just ran and let go of the worry, it felt freer
 
 ## The "50% > 0%" principle
 - Seed insight (Feb 2026): You don't have to be perfect to show up. Showing up at 50% beats staying home at 0%. Like being vegan but still eating bacon — imperfect action massively beats no action.

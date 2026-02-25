@@ -14,7 +14,8 @@
 - **Skill-progression seeker** — Naturally drawn to activities with visible milestones that give novelty, mastery, and aliveness rather than just discipline.
 
 ## Emotional patterns & challenges
-- **Chronic daily tension headaches** — worsen with stress and tension
+- **"Hank" — the inner critic** — Near-constant strict inner voice telling him he's doing something wrong. Named in therapy (Feb 2026). Creates background tension that likely amplifies physical pain too. See `growth/insights.md` for details.
+- **Chronic daily tension headaches** — worsen with stress and tension; may be partly driven by Hank's constant vigilance
 - **Overthinking & self-monitoring** — Interprets small social signals harshly, doubts himself, creates heaviness that prevents feeling safe or relaxed
 - **Internal pressure & restlessness** — Often operates from a mental mode that pushes him to perform, structure himself, and follow rules instead of listening to what he actually needs
 - **Social anxiety** — Not a skill problem; comes from constricting and shrinking when self-doubt kicks in
