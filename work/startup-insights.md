@@ -18,6 +18,13 @@ Reflections and principles about building startups, accumulated from experience 
 - **Niche AI has a lifespan problem** — you can niche down (e.g. AI just for reflection, AI just for product recommendations) but the big labs will eventually cover those niches too. The moat erodes.
 - **B2B + clear value prop can work** — selling to companies who already spend money on the problem (e.g. PR distribution) avoids the "convince consumers to pay" challenge.
 
+## Solo founder vs co-founder
+
+- **Pattern David has noticed**: Many founders do their first startup with a co-founder, then go solo on the next one — usually once they have money and can hire people instead.
+- **Appeal of solo**: Full autonomy, no need to agree with a peer, can set a higher performance bar, hire a team that reports to you rather than navigating an equal partnership.
+- **Risk of solo**: Loneliness, pushing people away, and the "emperor problem" — removing all friction and surrounding yourself with yes-men always ends badly. A co-founder who blocks you and creates friction might be genuinely beneficial *because* of the discomfort.
+- **David's current lean**: Interested in trying solo after a potential PetRadar exit, but genuinely unsure. Recognizes both the appeal and the danger.
+
 ## Anti-patterns from PetRadar
 
 - Incidental usage (pet goes missing rarely) → hard to build habit/retention
