@@ -1,6 +1,9 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { readdir, readFile } from "fs/promises";
-import { execSync } from "child_process";
+import { exec } from "child_process";
+import { promisify } from "util";
+
+const execAsync = promisify(exec);
 import path from "path";
 
 const CWD = "/home/imdavid/davidclaude";
@@ -221,14 +224,14 @@ function splitMarkdownByH2(content: string, filename: string): KBChunk[] {
   return chunks;
 }
 
-function runKBSearch(queryArgs: string): KBChunk[] {
+async function runKBSearch(queryArgs: string): Promise<KBChunk[]> {
   try {
-    const output = execSync(`./kb-search ${queryArgs}`, {
+    const { stdout } = await execAsync(`./kb-search ${queryArgs}`, {
       cwd: CWD,
       encoding: "utf-8",
       timeout: 15000,
     });
-    return parseKBSearchResults(output);
+    return parseKBSearchResults(stdout);
   } catch {
     return [];
   }
@@ -292,8 +295,6 @@ Output one search query per line, formatted as kb-search arguments: "term1" "ter
 If the message is trivial (greetings, "thanks", yes/no) or needs no background context, respond with exactly: NONE
 On follow-up messages: if existing context already covers this, respond with: NONE`;
 
-// TODO: Currently disabled — trying without chunk filtering first, using all search results directly.
-// Re-enable if context is too noisy for the main agent.
 const CHUNK_FILTER_PROMPT = `You select which knowledge base chunks are relevant to a user's message. You will be given numbered chunks and a user message. Respond with ONLY the chunk IDs that contain useful background context, one per line. If none are relevant, respond with: NONE
 
 Rules:
@@ -332,7 +333,6 @@ async function queryNoTools(
       systemPrompt,
       allowedTools: [],
       maxTurns: 1,
-      settingSources: ["project", "local"],
       ...(sessionId ? { resume: sessionId } : {}),
       ...(abortController ? { abortController } : {}),
     },
@@ -370,6 +370,7 @@ export async function retrieveContext(
   onQueryCreated?: (q: { close(): void }) => void,
 ): Promise<RetrievalResult> {
   const log = (msg: string) => console.log(`[retrieval] ${msg}`);
+  const tStart = Date.now();
   const previouslySelected = filterSessionId ? getSelectedChunks(filterSessionId) : new Set<string>();
   log(`Start — plannerSession=${plannerSessionId?.slice(0, 8) ?? "none"}, filterSession=${filterSessionId?.slice(0, 8) ?? "none"}, previouslySelected=${previouslySelected.size}`);
 
@@ -379,8 +380,10 @@ export async function retrieveContext(
     : `Message from David:\n"${text}"\n\nWhat background context would be useful? Output search queries.`;
 
   onProgress?.("🧠 Planning searches…");
+  const t0 = Date.now();
   const planResult = await queryNoTools(plannerPrompt, SEARCH_PLANNER_PROMPT, plannerSessionId, abortController, onQueryCreated);
   const newPlannerSessionId = planResult.sessionId;
+  log(`Planner completed in ${Date.now() - t0}ms`);
   log(`Planner raw output:\n${planResult.result}`);
 
   if (planResult.result === "NONE" || !planResult.result) {
@@ -396,7 +399,6 @@ export async function retrieveContext(
     .filter(l => l && l !== "NONE" && l.includes('"'));
 
   log(`Parsed ${queries.length} queries: ${JSON.stringify(queries)}`);
-  onProgress?.(`🔍 Running ${queries.length} search${queries.length > 1 ? "es" : ""}…`);
 
   // --- Step 2: Run searches in code + read recent/ daily files ---
   let allChunks: KBChunk[] = [];
@@ -428,12 +430,18 @@ export async function retrieveContext(
   // Check abort before running searches
   if (abortController?.signal.aborted) throw new Error("Cancelled");
 
-  // Run each search query
-  for (const q of queries) {
-    if (abortController?.signal.aborted) throw new Error("Cancelled");
-    onProgress?.(`🔍 KB search: ${q}`);
-    const results = runKBSearch(q);
-    log(`Search ${q} → ${results.length} chunks: ${results.map(c => c.id).join(", ")}`);
+  // Run all search queries in parallel
+  onProgress?.(`🔍 Running ${queries.length} search${queries.length > 1 ? "es" : ""} in parallel…`);
+  const t2 = Date.now();
+  const searchResults = await Promise.all(
+    queries.map(async q => {
+      const results = await runKBSearch(q);
+      log(`Search ${q} → ${results.length} chunks: ${results.map(c => c.id).join(", ")}`);
+      return results;
+    })
+  );
+  log(`All searches completed in ${Date.now() - t2}ms`);
+  for (const results of searchResults) {
     allChunks.push(...results);
   }
 
@@ -467,8 +475,10 @@ export async function retrieveContext(
 
   log(`Sending ${newChunks.length} chunks to filter (IDs: ${newChunks.map(c => c.id).join(", ")})`);
   onProgress?.(`🧠 Selecting from ${newChunks.length} chunks…`);
+  const t3 = Date.now();
   const filterResult = await queryNoTools(filterPrompt, CHUNK_FILTER_PROMPT, filterSessionId, abortController, onQueryCreated);
   const newFilterSessionId = filterResult.sessionId;
+  log(`Filter completed in ${Date.now() - t3}ms`);
   log(`Filter raw output:\n${filterResult.result}`);
 
   if (filterResult.result === "NONE" || !filterResult.result) {
@@ -527,6 +537,7 @@ export async function retrieveContext(
 
   const files = [...new Set(selectedNow.map(c => c.file))];
   log(`Context assembled: ${context.length} chars from ${files.join(", ")}`);
+  log(`Total retrieval time: ${Date.now() - tStart}ms`);
   onProgress?.(`📚 Selected ${selectedNow.length}/${newChunks.length} chunks from ${files.join(", ")}`);
 
   return { context, plannerSessionId: newPlannerSessionId, filterSessionId: newFilterSessionId, selectedChunks: updatedSelected };

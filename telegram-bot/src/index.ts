@@ -304,6 +304,11 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
     }
   }
 
+  const onQueryCreated = (q: { close(): void }) => {
+    const handler = activeHandlers.get(threadId);
+    if (handler) handler.activeQuery = q;
+  };
+
   try {
     // --- Retrieve KB context before main agent ---
     const session = isAutoForward ? null : getSession(threadId);
@@ -311,10 +316,6 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
     if (!skipRetrieval) {
       try {
         onProgress("── Retrieval ──");
-        const onQueryCreated = (q: { close(): void }) => {
-          const handler = activeHandlers.get(threadId);
-          if (handler) handler.activeQuery = q;
-        };
         const retrieval = await retrieveContext(text, session?.retrieval_session_id, session?.filter_session_id, onProgress, abortController, onQueryCreated);
         if (retrieval.plannerSessionId) {
           setRetrievalSessionId(threadId, retrieval.plannerSessionId);
@@ -342,10 +343,6 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
     } catch { /* not a git repo or error — fine */ }
 
     onProgress("── Responding ──");
-    const onQueryCreated = (q: { close(): void }) => {
-      const handler = activeHandlers.get(threadId);
-      if (handler) handler.activeQuery = q;
-    };
     const result = await sendMessage(enrichedText, session?.session_id, onProgress, channelConfig?.systemPrompt, abortController, onQueryCreated);
 
     setSessionId(threadId, result.sessionId);
@@ -695,13 +692,14 @@ bot.on("message:text", (ctx) => {
     });
   }
 
-  // --- Normal message routing ---
+  // --- Normal message routing (fire-and-forget so Grammy can process "stop" immediately) ---
   const replyToMsgId = ctx.msg.reply_to_message?.message_id;
   if (replyToMsgId && updaterMessageIds.has(replyToMsgId)) {
     const threadId = updaterMessageIds.get(replyToMsgId)!;
-    return handleUpdaterReply(ctx, ctx.msg.text, threadId);
+    handleUpdaterReply(ctx, ctx.msg.text, threadId);
+    return;
   }
-  return handleMessage(ctx, ctx.msg.text);
+  handleMessage(ctx, ctx.msg.text);
 });
 
 bot.on("message:photo", (ctx) => {
@@ -720,27 +718,28 @@ bot.on("message:photo", (ctx) => {
     return;
   }
 
-  return processImage(ctx, largest.file_id, "image/jpeg", ctx.msg.caption);
+  processImage(ctx, largest.file_id, "image/jpeg", ctx.msg.caption);
 });
 
 bot.on("message:voice", (ctx) => {
-  return processAudio(ctx, ctx.msg.voice.file_id, "voice.ogg");
+  processAudio(ctx, ctx.msg.voice.file_id, "voice.ogg");
 });
 
 bot.on("message:audio", (ctx) => {
   const audio = ctx.msg.audio;
   const ext = audio.mime_type?.split("/")[1] ?? "mp3";
-  return processAudio(ctx, audio.file_id, audio.file_name ?? `audio.${ext}`);
+  processAudio(ctx, audio.file_id, audio.file_name ?? `audio.${ext}`);
 });
 
 bot.on("message:document", (ctx) => {
   const doc = ctx.msg.document;
   const mime = doc.mime_type ?? "";
   if (mime.startsWith("image/")) {
-    return processImage(ctx, doc.file_id, mime, ctx.msg.caption);
+    processImage(ctx, doc.file_id, mime, ctx.msg.caption);
+    return;
   }
   if (mime.startsWith("audio/") || mime === "video/ogg") {
-    return processAudio(ctx, doc.file_id, doc.file_name ?? "audio.ogg");
+    processAudio(ctx, doc.file_id, doc.file_name ?? "audio.ogg");
   }
 });
 
