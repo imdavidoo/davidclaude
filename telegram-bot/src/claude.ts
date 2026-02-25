@@ -319,6 +319,8 @@ async function queryNoTools(
   prompt: string,
   systemPrompt: string,
   sessionId?: string | null,
+  abortController?: AbortController,
+  onQueryCreated?: (q: { close(): void }) => void,
 ): Promise<{ result: string; sessionId: string }> {
   const response = query({
     prompt,
@@ -332,13 +334,17 @@ async function queryNoTools(
       maxTurns: 1,
       settingSources: ["project", "local"],
       ...(sessionId ? { resume: sessionId } : {}),
+      ...(abortController ? { abortController } : {}),
     },
   });
+
+  onQueryCreated?.(response);
 
   let result = "";
   let finalSessionId = "";
 
   for await (const message of response) {
+    if (abortController?.signal.aborted) break;
     if (message.type === "system" && message.subtype === "init") {
       finalSessionId = message.session_id;
     }
@@ -350,6 +356,8 @@ async function queryNoTools(
     }
   }
 
+  if (abortController?.signal.aborted) throw new Error("Cancelled");
+
   return { result: result.trim(), sessionId: finalSessionId };
 }
 
@@ -357,7 +365,9 @@ export async function retrieveContext(
   text: string,
   plannerSessionId?: string | null,
   filterSessionId?: string | null,
-  onProgress?: (line: string) => void
+  onProgress?: (line: string) => void,
+  abortController?: AbortController,
+  onQueryCreated?: (q: { close(): void }) => void,
 ): Promise<RetrievalResult> {
   const log = (msg: string) => console.log(`[retrieval] ${msg}`);
   const previouslySelected = filterSessionId ? getSelectedChunks(filterSessionId) : new Set<string>();
@@ -369,7 +379,7 @@ export async function retrieveContext(
     : `Message from David:\n"${text}"\n\nWhat background context would be useful? Output search queries.`;
 
   onProgress?.("🧠 Planning searches…");
-  const planResult = await queryNoTools(plannerPrompt, SEARCH_PLANNER_PROMPT, plannerSessionId);
+  const planResult = await queryNoTools(plannerPrompt, SEARCH_PLANNER_PROMPT, plannerSessionId, abortController, onQueryCreated);
   const newPlannerSessionId = planResult.sessionId;
   log(`Planner raw output:\n${planResult.result}`);
 
@@ -415,8 +425,12 @@ export async function retrieveContext(
     } catch { /* no recent/ directory */ }
   }
 
+  // Check abort before running searches
+  if (abortController?.signal.aborted) throw new Error("Cancelled");
+
   // Run each search query
   for (const q of queries) {
+    if (abortController?.signal.aborted) throw new Error("Cancelled");
     onProgress?.(`🔍 KB search: ${q}`);
     const results = runKBSearch(q);
     log(`Search ${q} → ${results.length} chunks: ${results.map(c => c.id).join(", ")}`);
@@ -441,6 +455,9 @@ export async function retrieveContext(
     return { context: "", plannerSessionId: newPlannerSessionId, filterSessionId: filterSessionId ?? "", selectedChunks: previouslySelected };
   }
 
+  // Check abort before starting filter
+  if (abortController?.signal.aborted) throw new Error("Cancelled");
+
   // --- Step 3: Ask filter which chunks are relevant (separate session) ---
   const chunkList = newChunks
     .map(c => `[${c.id}]\n${c.content}`)
@@ -450,7 +467,7 @@ export async function retrieveContext(
 
   log(`Sending ${newChunks.length} chunks to filter (IDs: ${newChunks.map(c => c.id).join(", ")})`);
   onProgress?.(`🧠 Selecting from ${newChunks.length} chunks…`);
-  const filterResult = await queryNoTools(filterPrompt, CHUNK_FILTER_PROMPT, filterSessionId);
+  const filterResult = await queryNoTools(filterPrompt, CHUNK_FILTER_PROMPT, filterSessionId, abortController, onQueryCreated);
   const newFilterSessionId = filterResult.sessionId;
   log(`Filter raw output:\n${filterResult.result}`);
 
@@ -578,11 +595,12 @@ ${kbStructure}
 - Anything the main assistant already handled (if a diff is provided, those changes are already done — don't redo them)
 
 **Committing changes:**
-- After making KB changes (and running \`./kb-index\`), commit ONLY the files you changed
+- After making KB changes (and running \`./kb-index\`), commit all KB .md files you changed or created
+- Also commit any untracked .md KB files that the main assistant created (check \`git status\` for untracked .md files in KB directories)
 - Use \`git add <specific files>\` — never \`git add -A\` or \`git add .\`
 - Commit message format: \`KB: <short description of what changed>\`
 - Example: \`KB: Update Tom dynamics, add burnout insight\`
-- Do NOT commit files you didn't change. Other changes in the repo should be left alone.
+- Do NOT commit non-KB files (code, configs, etc.). Only commit .md files in KB directories.
 
 If nothing in the message is worth persisting, respond with exactly: NOTHING`;
 }
@@ -740,6 +758,8 @@ export async function sendMessage(
   sessionId?: string | null,
   onProgress?: (line: string) => void,
   channelPrompt?: string,
+  abortController?: AbortController,
+  onQueryCreated?: (q: { close(): void }) => void,
 ): Promise<ClaudeResult> {
   const response = query({
     prompt: text,
@@ -767,14 +787,19 @@ Context retrieval:
       allowedTools: ALLOWED_TOOLS,
       maxTurns: 50,
       ...(sessionId ? { resume: sessionId } : {}),
+      ...(abortController ? { abortController } : {}),
     },
   });
+
+  onQueryCreated?.(response);
 
   let finalSessionId = "";
   let result = "";
   let permissionDenials: PermissionDenial[] = [];
 
   for await (const message of response) {
+    if (abortController?.signal.aborted) break;
+
     // Capture session ID from init message
     if (message.type === "system" && message.subtype === "init") {
       finalSessionId = message.session_id;
@@ -840,6 +865,8 @@ Context retrieval:
       finalSessionId = message.session_id;
     }
   }
+
+  if (abortController?.signal.aborted) throw new Error("Cancelled");
 
   return { response: result, sessionId: finalSessionId, permissionDenials };
 }

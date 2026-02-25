@@ -89,6 +89,20 @@ function getMutex(threadId: number): Mutex {
   return m;
 }
 
+// --- Per-thread cancellation ---
+
+interface ActiveHandler {
+  abortController: AbortController;
+  activeQuery: { close(): void } | null;
+}
+
+const activeHandlers = new Map<number, ActiveHandler>();
+const stopGenerations = new Map<number, number>();
+
+function getStopGeneration(threadId: number): number {
+  return stopGenerations.get(threadId) ?? 0;
+}
+
 // --- Global KB updater (runs after main agent, one at a time) ---
 
 const updaterMutex = new Mutex();
@@ -221,12 +235,25 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
 
   if (!threadId) return;
 
-  const channelConfig = getChannelConfig(ctx.chat!.id);
-  const skipRetrieval = flags.skipRetrieval || channelConfig?.enableRetrieval === false;
-  const skipKBUpdate = flags.skipKBUpdate || channelConfig?.enableKBUpdate === false;
+  // Capture generation before acquiring mutex (for stop invalidation)
+  const generation = getStopGeneration(threadId);
 
   const mutex = getMutex(threadId);
   await mutex.acquire();
+
+  // If a stop happened while we were queued, bail out
+  if (getStopGeneration(threadId) !== generation) {
+    mutex.release();
+    return;
+  }
+
+  // Set up cancellation for this handler
+  const abortController = new AbortController();
+  activeHandlers.set(threadId, { abortController, activeQuery: null });
+
+  const channelConfig = getChannelConfig(ctx.chat!.id);
+  const skipRetrieval = flags.skipRetrieval || channelConfig?.enableRetrieval === false;
+  const skipKBUpdate = flags.skipKBUpdate || channelConfig?.enableKBUpdate === false;
 
   const replyOpts = { reply_parameters: { message_id: threadId } };
 
@@ -284,7 +311,11 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
     if (!skipRetrieval) {
       try {
         onProgress("── Retrieval ──");
-        const retrieval = await retrieveContext(text, session?.retrieval_session_id, session?.filter_session_id, onProgress);
+        const onQueryCreated = (q: { close(): void }) => {
+          const handler = activeHandlers.get(threadId);
+          if (handler) handler.activeQuery = q;
+        };
+        const retrieval = await retrieveContext(text, session?.retrieval_session_id, session?.filter_session_id, onProgress, abortController, onQueryCreated);
         if (retrieval.plannerSessionId) {
           setRetrievalSessionId(threadId, retrieval.plannerSessionId);
         }
@@ -295,10 +326,14 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
           enrichedText = `[Retrieved KB context]\n${retrieval.context}\n\n[User message]\n${text}`;
         }
       } catch (err) {
+        if (abortController.signal.aborted) throw err;
         console.error(`[thread:${threadId}] Retrieval failed:`, err);
         onProgress("📚 Retrieval failed — continuing without context");
       }
     }
+
+    // Check abort between retrieval and main agent
+    if (abortController.signal.aborted) throw new Error("Cancelled");
 
     // Snapshot HEAD before main agent so we can diff its changes later
     let headBefore: string | null = null;
@@ -307,16 +342,25 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
     } catch { /* not a git repo or error — fine */ }
 
     onProgress("── Responding ──");
-    const result = await sendMessage(enrichedText, session?.session_id, onProgress, channelConfig?.systemPrompt);
+    const onQueryCreated = (q: { close(): void }) => {
+      const handler = activeHandlers.get(threadId);
+      if (handler) handler.activeQuery = q;
+    };
+    const result = await sendMessage(enrichedText, session?.session_id, onProgress, channelConfig?.systemPrompt, abortController, onQueryCreated);
 
     setSessionId(threadId, result.sessionId);
 
-    // Diff everything the main agent changed (committed + uncommitted) against the pre-snapshot
+    // Diff everything the main agent changed (committed + uncommitted + untracked) against the pre-snapshot
     let mainAgentDiff: string | null = null;
     if (headBefore) {
       try {
+        const parts: string[] = [];
         const diff = execSync(`git diff ${headBefore}`, { cwd: CWD, encoding: "utf-8", timeout: 5000 }).trim();
-        if (diff) mainAgentDiff = diff;
+        if (diff) parts.push(diff);
+        // git diff misses untracked files — capture those separately
+        const untracked = execSync('git ls-files --others --exclude-standard -- "*.md"', { cwd: CWD, encoding: "utf-8", timeout: 5000 }).trim();
+        if (untracked) parts.push(`New untracked files:\n${untracked}`);
+        if (parts.length > 0) mainAgentDiff = parts.join("\n\n");
       } catch { /* no diff or git error — fine */ }
     }
     if (!skipKBUpdate) {
@@ -360,11 +404,16 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
       .deleteMessage(ctx.chat!.id, placeholder.message_id)
       .catch(() => {});
 
-    const errMsg = err instanceof Error ? err.message : String(err);
-    await ctx.reply(`Error: ${errMsg.slice(0, 1000)}`, replyOpts);
-    console.error(`[thread:${threadId}] Error:`, err);
+    if (abortController.signal.aborted) {
+      console.log(`[thread:${threadId}] Stopped by user`);
+    } else {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      await ctx.reply(`Error: ${errMsg.slice(0, 1000)}`, replyOpts);
+      console.error(`[thread:${threadId}] Error:`, err);
+    }
   } finally {
     clearInterval(typingInterval);
+    activeHandlers.delete(threadId);
     mutex.release();
   }
 }
@@ -624,6 +673,29 @@ async function handleUpdaterReply(ctx: Context, text: string, threadId: number):
 // --- Message handlers ---
 
 bot.on("message:text", (ctx) => {
+  const msgText = ctx.msg.text.trim().toLowerCase();
+
+  // --- "stop" command: cancel in-progress processing ---
+  if (msgText === "stop" || msgText === "/stop") {
+    const threadId = ctx.msg.message_thread_id;
+    if (!threadId) return;
+
+    // Increment generation to invalidate queued handlers
+    stopGenerations.set(threadId, getStopGeneration(threadId) + 1);
+
+    // Abort the active handler
+    const handler = activeHandlers.get(threadId);
+    if (handler) {
+      handler.abortController.abort();
+      handler.activeQuery?.close();
+    }
+
+    return ctx.reply("Stopped.", {
+      reply_parameters: { message_id: threadId },
+    });
+  }
+
+  // --- Normal message routing ---
   const replyToMsgId = ctx.msg.reply_to_message?.message_id;
   if (replyToMsgId && updaterMessageIds.has(replyToMsgId)) {
     const threadId = updaterMessageIds.get(replyToMsgId)!;
