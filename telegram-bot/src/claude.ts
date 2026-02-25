@@ -31,6 +31,7 @@ const ALLOWED_TOOLS = [
   "Bash(head *)",
   "Bash(tail *)",
   "Bash(wc *)",
+  "Bash(find *)",
 ];
 
 export interface PermissionDenial {
@@ -533,6 +534,11 @@ const UPDATER_TOOLS = [
   "Bash(git commit *)",
   "Bash(git status)",
   "Bash(git diff *)",
+  "Bash(cat *)",
+  "Bash(head *)",
+  "Bash(tail *)",
+  "Bash(wc *)",
+  "Bash(find *)",
 ];
 
 function buildUpdaterPrompt(kbStructure: string): string {

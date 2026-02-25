@@ -512,13 +512,14 @@ async function processAudio(
 
   if (!threadId) return;
 
-  ctx.api
-    .sendChatAction(ctx.chat!.id, "typing", { message_thread_id: threadId })
-    .catch(() => {});
+  const replyOpts = { reply_parameters: { message_id: threadId } };
+  const statusMsg = await ctx.reply("transcribing...", replyOpts);
 
   try {
     const buffer = await downloadTelegramFile(fileId);
     const transcription = await transcribeAudio(buffer, filename);
+
+    await ctx.api.deleteMessage(ctx.chat!.id, statusMsg.message_id).catch(() => {});
 
     const prompt = `[User sent a voice/audio message]\n\nTranscription:\n${transcription}`;
 
