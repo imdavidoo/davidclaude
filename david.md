@@ -3,6 +3,7 @@
 ## Basics
 - 28 years old, born 3 November 1997
 - Dutch, lives in Amsterdam with girlfriend Ira
+- Speaks Dutch natively but prefers English for assistant interactions (even when he sends messages in Dutch)
 
 ## Core traits
 - **Builder mindset** — Loves progressing, creating, and building things (in work and life). Drawn to stories about building something from nothing.
@@ -81,6 +82,11 @@ Childhood left him feeling out of control and in pain → developed a coping mec
 - Enjoys bodyweight/calisthenics over gym equipment
 - Hobby: salsa dancing
 - **Adaptive zone**: consistent 40-100% beats pushing 130%. Hard pushing → extended recovery. Consistent showing up → better results. Applies to work and life too.
+
+## To do when back in Netherlands
+- Get a hearing test
+- Try the Goggins max-distance run experiment (details in `sports/_index.md`)
+- Plant a gooseberry (kruisbes) on the balcony
 
 ## To buy (general — no rush)
 - Sandals — Teva-style, sturdy outdoor sandals
