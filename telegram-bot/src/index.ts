@@ -513,6 +513,7 @@ async function processImages(
   if (!threadId) return;
 
   const savedPaths: string[] = [];
+  const generation = getStopGeneration(threadId);
 
   try {
     // Save all images to disk
@@ -521,6 +522,8 @@ async function processImages(
       const path = await saveImage(img.fileId, ext);
       savedPaths.push(path);
     }
+
+    if (getStopGeneration(threadId) !== generation) return;
 
     const pathList = savedPaths.map((p) => `- ${p}`).join("\n");
     const count = savedPaths.length;
@@ -561,11 +564,15 @@ async function processAudio(
   const replyOpts = { reply_parameters: { message_id: threadId } };
   const statusMsg = await ctx.reply("transcribing...", replyOpts);
 
+  const generation = getStopGeneration(threadId);
+
   try {
     const buffer = await downloadTelegramFile(fileId);
     const transcription = await transcribeAudio(buffer, filename);
 
     await ctx.api.deleteMessage(ctx.chat!.id, statusMsg.message_id).catch(() => {});
+
+    if (getStopGeneration(threadId) !== generation) return;
 
     const prompt = `[User sent a voice/audio message]\n\nTranscription:\n${transcription}`;
 
