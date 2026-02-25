@@ -9,7 +9,7 @@ Ideas and inspiration for meals, snacks, and takeout.
 *(to be filled)*
 
 ## Snacks
-*(to be filled)*
+- Apples
 
 ## Takeout
 *(to be filled)*
