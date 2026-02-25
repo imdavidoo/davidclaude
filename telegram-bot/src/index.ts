@@ -28,7 +28,7 @@ if (!ALLOWED_CHAT_ID) {
 
 const bot = new Bot(BOT_TOKEN);
 
-// --- Message flags (#q, #ns, #nkb) ---
+// --- Message flags (#q, #ds, #du) ---
 
 interface MessageFlags {
   skipRetrieval: boolean;
@@ -44,13 +44,13 @@ function parseFlags(text: string): { cleaned: string; flags: MessageFlags } {
     flags.skipKBUpdate = true;
     cleaned = cleaned.replace(/(?:^|\s)#q(?:\s|$)/i, " ");
   }
-  if (/(?:^|\s)#ns(?:\s|$)/i.test(cleaned)) {
+  if (/(?:^|\s)#ds(?:\s|$)/i.test(cleaned)) {
     flags.skipRetrieval = true;
-    cleaned = cleaned.replace(/(?:^|\s)#ns(?:\s|$)/i, " ");
+    cleaned = cleaned.replace(/(?:^|\s)#ds(?:\s|$)/i, " ");
   }
-  if (/(?:^|\s)#nkb(?:\s|$)/i.test(cleaned)) {
+  if (/(?:^|\s)#du(?:\s|$)/i.test(cleaned)) {
     flags.skipKBUpdate = true;
-    cleaned = cleaned.replace(/(?:^|\s)#nkb(?:\s|$)/i, " ");
+    cleaned = cleaned.replace(/(?:^|\s)#du(?:\s|$)/i, " ");
   }
 
   return { cleaned: cleaned.trim(), flags };
