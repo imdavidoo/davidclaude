@@ -841,6 +841,7 @@ export async function sendMessage(
   channelPrompt?: string,
   abortController?: AbortController,
   onQueryCreated?: (q: { close(): void }) => void,
+  disallowedTools?: string[],
 ): Promise<ClaudeResult> {
   const response = query({
     prompt: text,
@@ -866,6 +867,7 @@ Context retrieval:
       },
       settingSources: ["project", "local"],
       allowedTools: ALLOWED_TOOLS,
+      ...(disallowedTools?.length ? { disallowedTools } : {}),
       maxTurns: 50,
       ...(sessionId ? { resume: sessionId } : {}),
       ...(abortController ? { abortController } : {}),

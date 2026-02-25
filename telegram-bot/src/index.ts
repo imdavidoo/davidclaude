@@ -347,7 +347,7 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
 
     onProgress("── Responding ──");
     const tAgent = Date.now();
-    const result = await sendMessage(enrichedText, session?.session_id, onProgress, channelConfig?.systemPrompt, abortController, onQueryCreated);
+    const result = await sendMessage(enrichedText, session?.session_id, onProgress, channelConfig?.systemPrompt, abortController, onQueryCreated, channelConfig?.disallowedTools);
     console.log(`[thread:${threadId}] Main agent: ${Date.now() - tAgent}ms`);
 
     setSessionId(threadId, result.sessionId);
