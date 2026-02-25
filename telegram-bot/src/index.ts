@@ -309,6 +309,7 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
     if (handler) handler.activeQuery = q;
   };
 
+  const tHandler = Date.now();
   try {
     // --- Retrieve KB context before main agent ---
     const session = isAutoForward ? null : getSession(threadId);
@@ -316,6 +317,7 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
     if (!skipRetrieval) {
       try {
         onProgress("── Retrieval ──");
+        const tRetrieval = Date.now();
         const retrieval = await retrieveContext(text, session?.retrieval_session_id, session?.filter_session_id, onProgress, abortController, onQueryCreated);
         if (retrieval.plannerSessionId) {
           setRetrievalSessionId(threadId, retrieval.plannerSessionId);
@@ -323,6 +325,7 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
         if (retrieval.filterSessionId) {
           setFilterSessionId(threadId, retrieval.filterSessionId);
         }
+        console.log(`[thread:${threadId}] Retrieval total: ${Date.now() - tRetrieval}ms`);
         if (retrieval.context) {
           enrichedText = `[Retrieved KB context]\n${retrieval.context}\n\n[User message]\n${text}`;
         }
@@ -343,7 +346,9 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
     } catch { /* not a git repo or error — fine */ }
 
     onProgress("── Responding ──");
+    const tAgent = Date.now();
     const result = await sendMessage(enrichedText, session?.session_id, onProgress, channelConfig?.systemPrompt, abortController, onQueryCreated);
+    console.log(`[thread:${threadId}] Main agent: ${Date.now() - tAgent}ms`);
 
     setSessionId(threadId, result.sessionId);
 
@@ -394,7 +399,7 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
       );
     }
 
-    console.log(`[thread:${threadId}] ${text.slice(0, 50)}...`);
+    console.log(`[thread:${threadId}] Total handler: ${Date.now() - tHandler}ms — ${text.slice(0, 50)}...`);
   } catch (err) {
     if (progressTimer) clearTimeout(progressTimer);
     await ctx.api
@@ -517,11 +522,13 @@ async function processImages(
 
   try {
     // Save all images to disk
+    const tImg = Date.now();
     for (const img of images) {
       const ext = img.mimeType.split("/")[1] ?? "jpg";
       const path = await saveImage(img.fileId, ext);
       savedPaths.push(path);
     }
+    console.log(`[thread:${threadId}] Image download: ${Date.now() - tImg}ms (${images.length} file${images.length > 1 ? "s" : ""})`);
 
     if (getStopGeneration(threadId) !== generation) return;
 
@@ -567,8 +574,12 @@ async function processAudio(
   const generation = getStopGeneration(threadId);
 
   try {
+    const tAudio = Date.now();
     const buffer = await downloadTelegramFile(fileId);
+    console.log(`[thread:${threadId}] Audio download: ${Date.now() - tAudio}ms (${(buffer.length / 1024).toFixed(0)}KB)`);
+    const tTranscribe = Date.now();
     const transcription = await transcribeAudio(buffer, filename);
+    console.log(`[thread:${threadId}] Transcription: ${Date.now() - tTranscribe}ms (${transcription.length} chars)`);
 
     await ctx.api.deleteMessage(ctx.chat!.id, statusMsg.message_id).catch(() => {});
 

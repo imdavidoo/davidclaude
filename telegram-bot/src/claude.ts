@@ -237,6 +237,63 @@ async function runKBSearch(queryArgs: string): Promise<KBChunk[]> {
   }
 }
 
+function extractKeywords(queries: string[]): string[] {
+  const keywords: string[] = [];
+  for (const q of queries) {
+    const matches = q.match(/"([^"]+)"/g);
+    if (matches) {
+      for (const m of matches) {
+        keywords.push(m.slice(1, -1).toLowerCase());
+      }
+    }
+  }
+  return [...new Set(keywords)];
+}
+
+function createChunkPreview(chunk: KBChunk, keywords: string[], maxChars = 500): string {
+  if (chunk.content.length <= maxChars) return chunk.content;
+
+  const lines = chunk.content.split("\n");
+  const includedIndices = new Set<number>();
+
+  // Always include first 3 lines
+  for (let i = 0; i < Math.min(3, lines.length); i++) {
+    includedIndices.add(i);
+  }
+
+  // Find lines containing keywords and include ±1 line of context
+  for (let i = 0; i < lines.length; i++) {
+    const lineLower = lines[i].toLowerCase();
+    if (keywords.some(kw => lineLower.includes(kw))) {
+      for (let j = Math.max(0, i - 1); j <= Math.min(lines.length - 1, i + 1); j++) {
+        includedIndices.add(j);
+      }
+    }
+  }
+
+  // Build preview from included lines, inserting [...] for gaps
+  const sorted = [...includedIndices].sort((a, b) => a - b);
+  const parts: string[] = [];
+  let charCount = 0;
+  let prevIdx = -1;
+
+  for (const idx of sorted) {
+    if (charCount >= maxChars) break;
+    if (prevIdx >= 0 && idx > prevIdx + 1) {
+      parts.push("[…]");
+    }
+    parts.push(lines[idx]);
+    charCount += lines[idx].length;
+    prevIdx = idx;
+  }
+
+  if (sorted[sorted.length - 1] < lines.length - 1) {
+    parts.push("[…]");
+  }
+
+  return parts.join("\n");
+}
+
 function deduplicateChunks(chunks: KBChunk[]): KBChunk[] {
   const seen = new Set<string>();
   return chunks.filter(c => {
@@ -383,8 +440,10 @@ export async function retrieveContext(
   const t0 = Date.now();
   const planResult = await queryNoTools(plannerPrompt, SEARCH_PLANNER_PROMPT, plannerSessionId, abortController, onQueryCreated);
   const newPlannerSessionId = planResult.sessionId;
-  log(`Planner completed in ${Date.now() - t0}ms`);
+  const plannerMs = Date.now() - t0;
+  log(`Planner completed in ${plannerMs}ms`);
   log(`Planner raw output:\n${planResult.result}`);
+  onProgress?.(`🧠 Planner done (${(plannerMs / 1000).toFixed(1)}s)`);
 
   if (planResult.result === "NONE" || !planResult.result) {
     log("Planner said NONE — skipping");
@@ -405,6 +464,7 @@ export async function retrieveContext(
 
   // Include recent daily files only on first retrieval (they don't change between messages)
   if (!filterSessionId) {
+    const tRecent = Date.now();
     try {
       const recentDir = path.join(CWD, "recent");
       const recentFiles = await readdir(recentDir);
@@ -425,13 +485,16 @@ export async function retrieveContext(
         allChunks.push(...chunks);
       }
     } catch { /* no recent/ directory */ }
+    log(`Recent files loaded in ${Date.now() - tRecent}ms`);
   }
 
   // Check abort before running searches
   if (abortController?.signal.aborted) throw new Error("Cancelled");
 
   // Run all search queries in parallel
-  onProgress?.(`🔍 Running ${queries.length} search${queries.length > 1 ? "es" : ""} in parallel…`);
+  for (const q of queries) {
+    onProgress?.(`🔍 KB search: ${q}`);
+  }
   const t2 = Date.now();
   const searchResults = await Promise.all(
     queries.map(async q => {
@@ -440,10 +503,12 @@ export async function retrieveContext(
       return results;
     })
   );
-  log(`All searches completed in ${Date.now() - t2}ms`);
+  const searchMs = Date.now() - t2;
+  log(`All searches completed in ${searchMs}ms`);
   for (const results of searchResults) {
     allChunks.push(...results);
   }
+  onProgress?.(`🔍 Searches done (${(searchMs / 1000).toFixed(1)}s)`);
 
   log(`Total raw chunks before dedup: ${allChunks.length}`);
 
@@ -452,8 +517,9 @@ export async function retrieveContext(
   log(`After dedup: ${allChunks.length}`);
 
   // Re-read content from disk (index may be stale)
+  const tResolve = Date.now();
   allChunks = await resolveChunksFromDisk(allChunks);
-  log(`After disk resolve: ${allChunks.length} (dropped ${allChunks.length === 0 ? "all" : ""} stale chunks)`);
+  log(`Disk resolve: ${Date.now() - tResolve}ms — ${allChunks.length} chunks (dropped ${allChunks.length === 0 ? "all" : ""} stale)`);
 
   const newChunks = allChunks.filter(c => !previouslySelected.has(c.id));
   log(`After filtering previously-selected: ${newChunks.length} (removed ${allChunks.length - newChunks.length})`);
@@ -467,18 +533,21 @@ export async function retrieveContext(
   if (abortController?.signal.aborted) throw new Error("Cancelled");
 
   // --- Step 3: Ask filter which chunks are relevant (separate session) ---
+  const keywords = extractKeywords(queries);
   const chunkList = newChunks
-    .map(c => `[${c.id}]\n${c.content}`)
+    .map(c => `[${c.id}]\n${createChunkPreview(c, keywords)}`)
     .join("\n\n---\n\n");
 
-  const filterPrompt = `User message:\n"${text}"\n\nChunks found (${newChunks.length} total):\n\n${chunkList}\n\nWhich chunk IDs are relevant? Respond with one ID per line (format: "file.md §Section Name"). If none, respond: NONE`;
+  const filterPrompt = `User message:\n"${text}"\n\nChunks found (${newChunks.length} total, showing previews):\n\n${chunkList}\n\nWhich chunk IDs are relevant? Respond with one ID per line (format: "file.md §Section Name"). If none, respond: NONE`;
 
   log(`Sending ${newChunks.length} chunks to filter (IDs: ${newChunks.map(c => c.id).join(", ")})`);
-  onProgress?.(`🧠 Selecting from ${newChunks.length} chunks…`);
+  onProgress?.(`🧠 Filtering ${newChunks.length} chunks…`);
   const t3 = Date.now();
   const filterResult = await queryNoTools(filterPrompt, CHUNK_FILTER_PROMPT, filterSessionId, abortController, onQueryCreated);
   const newFilterSessionId = filterResult.sessionId;
-  log(`Filter completed in ${Date.now() - t3}ms`);
+  const filterMs = Date.now() - t3;
+  log(`Filter completed in ${filterMs}ms`);
+  onProgress?.(`🧠 Filter done (${(filterMs / 1000).toFixed(1)}s)`);
   log(`Filter raw output:\n${filterResult.result}`);
 
   if (filterResult.result === "NONE" || !filterResult.result) {
@@ -537,8 +606,9 @@ export async function retrieveContext(
 
   const files = [...new Set(selectedNow.map(c => c.file))];
   log(`Context assembled: ${context.length} chars from ${files.join(", ")}`);
-  log(`Total retrieval time: ${Date.now() - tStart}ms`);
-  onProgress?.(`📚 Selected ${selectedNow.length}/${newChunks.length} chunks from ${files.join(", ")}`);
+  const totalMs = Date.now() - tStart;
+  log(`Total retrieval time: ${totalMs}ms`);
+  onProgress?.(`📚 ${selectedNow.length}/${newChunks.length} chunks selected (${(totalMs / 1000).toFixed(1)}s total)`);
 
   return { context, plannerSessionId: newPlannerSessionId, filterSessionId: newFilterSessionId, selectedChunks: updatedSelected };
 }
