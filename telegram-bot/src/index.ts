@@ -1,4 +1,4 @@
-import { Bot, Context } from "grammy";
+import { Api, Bot, Context } from "grammy";
 import { sendMessage, retrieveContext, updateKnowledgeBase, replyToUpdater, executeSculptor, runSculptorAnalysis, clearSelectedChunksStore } from "./claude";
 import { getSession, setSessionId, setRetrievalSessionId, setFilterSessionId, setUpdaterSessionId, isSeen, markSeen } from "./sessions";
 import { splitMessage, markdownToTelegramHtml } from "./telegram";
@@ -120,48 +120,51 @@ const updaterMessageIds = new Map<number, number>();
 
 const SCULPTOR_DIR = path.join(CWD, ".sculptor");
 const SCULPTOR_PENDING = path.join(SCULPTOR_DIR, "pending.json");
-const SCULPTOR_CHAT_ID = -1003881403661; // DavidOS Direct discussion group
+const SCULPTOR_CHAT_ID = Number(process.env.SCULPTOR_CHAT_ID ?? -1003881403661);
 
 const sculptorMessageIds = new Map<number, { sessionId: string }>();
 
+// --- Shared lifecycle: acquire updater mutex → create tracker → run fn → handle errors → release ---
+
+async function withTrackedMutex(
+  opts: { api: Api; chatId: number; replyTo?: number; label: string; errorPrefix: string; tag: string },
+  fn: (tracker: ProgressTracker) => Promise<void>,
+): Promise<void> {
+  await updaterMutex.acquire();
+  const tracker = await ProgressTracker.create(opts.api, opts.chatId, opts.replyTo, opts.label);
+  try {
+    await fn(tracker);
+  } catch (err) {
+    console.error(`[${opts.tag}] Failed:`, err);
+    const errMsg = err instanceof Error ? err.message : String(err);
+    await tracker.finish(`${opts.errorPrefix}: ${errMsg.slice(0, 200)}`);
+  } finally {
+    tracker.destroy();
+    updaterMutex.release();
+  }
+}
+
 function fireKBUpdate(ctx: Context, text: string, threadId: number, sessionId?: string | null, mainAgentDiff?: string | null, lastAIResponse?: string | null): void {
   console.log(`[updater:${threadId}] fireKBUpdate called`);
-  (async () => {
-    console.log(`[updater:${threadId}] waiting for mutex...`);
-    await updaterMutex.acquire();
-    console.log(`[updater:${threadId}] mutex acquired`);
-
-    const tracker = await ProgressTracker.create(ctx.api, ctx.chat!.id, threadId, "📝 Updating knowledge base…");
-
-    try {
-      console.log(`[updater:${threadId}] placeholder sent, calling updateKnowledgeBase...`);
+  withTrackedMutex(
+    { api: ctx.api, chatId: ctx.chat!.id, replyTo: threadId, label: "📝 Updating knowledge base…", errorPrefix: "📝 KB update failed", tag: `updater:${threadId}` },
+    async (tracker) => {
       const result = await updateKnowledgeBase(text, sessionId, (line) => tracker.push(line), mainAgentDiff, lastAIResponse);
       console.log(`[updater:${threadId}] updateKnowledgeBase returned: result="${result.response?.slice(0, 100)}", sessionId=${result.sessionId?.slice(0, 8)}`);
       if (result.sessionId) {
         setUpdaterSessionId(threadId, result.sessionId);
       }
-
-      tracker.destroy();
-
       if (!result.response || result.response === "NOTHING") {
         await tracker.delete();
       } else {
         await tracker.finish(`✅ ${result.response}`);
-        // Register for reply routing
         if (updaterMessageIds.size > 500) {
           updaterMessageIds.delete(updaterMessageIds.keys().next().value!);
         }
         updaterMessageIds.set(tracker.messageId, threadId);
       }
-    } catch (err) {
-      tracker.destroy();
-      console.error(`[updater:${threadId}] KB update FAILED:`, err);
-      const errMsg = err instanceof Error ? err.message : String(err);
-      await tracker.finish(`📝 KB update failed: ${errMsg.slice(0, 200)}`);
-    } finally {
-      updaterMutex.release();
-    }
-  })();
+    },
+  );
 }
 
 // --- Security middleware ---
@@ -232,7 +235,7 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
   const replyOpts = { reply_parameters: { message_id: threadId } };
 
   // Send placeholder with progress tracking
-  const tracker = new ProgressTracker(ctx.api, ctx.chat!.id, (await ctx.reply("...", replyOpts)).message_id, { firstFlushDelay: 300 });
+  const tracker = await ProgressTracker.create(ctx.api, ctx.chat!.id, threadId, "...", { firstFlushDelay: 300 });
   const onProgress = (line: string) => tracker.push(line);
 
   // Typing indicator every 4s
@@ -448,17 +451,18 @@ async function processImages(
 
   if (!threadId) return;
 
-  const savedPaths: string[] = [];
+  let savedPaths: string[] = [];
   const generation = getStopGeneration(threadId);
 
   try {
-    // Save all images to disk
+    // Save all images to disk in parallel
     const tImg = Date.now();
-    for (const img of images) {
-      const ext = img.mimeType.split("/")[1] ?? "jpg";
-      const path = await saveImage(img.fileId, ext);
-      savedPaths.push(path);
-    }
+    savedPaths = await Promise.all(
+      images.map(img => {
+        const ext = img.mimeType.split("/")[1] ?? "jpg";
+        return saveImage(img.fileId, ext);
+      })
+    );
     console.log(`[thread:${threadId}] Image download: ${Date.now() - tImg}ms (${images.length} file${images.length > 1 ? "s" : ""})`);
 
     if (getStopGeneration(threadId) !== generation) return;
@@ -536,93 +540,68 @@ async function handleUpdaterReply(ctx: Context, text: string, threadId: number):
     return handleMessage(ctx, text);
   }
 
-  console.log(`[updater-reply:${threadId}] acquiring mutex...`);
-  await updaterMutex.acquire();
-  console.log(`[updater-reply:${threadId}] mutex acquired`);
-
-  const tracker = await ProgressTracker.create(ctx.api, ctx.chat!.id, threadId, "📝 Updating knowledge base…");
-
-  try {
-    const result = await replyToUpdater(text, updaterSessionId, (line) => tracker.push(line));
-
-    if (result.sessionId) {
-      setUpdaterSessionId(threadId, result.sessionId);
-    }
-
-    tracker.destroy();
-
-    if (!result.response || result.response === "NOTHING") {
-      await tracker.delete();
-    } else {
-      await tracker.finish(`✅ ${result.response}`);
-      if (updaterMessageIds.size > 500) {
-        updaterMessageIds.delete(updaterMessageIds.keys().next().value!);
+  await withTrackedMutex(
+    { api: ctx.api, chatId: ctx.chat!.id, replyTo: threadId, label: "📝 Updating knowledge base…", errorPrefix: "📝 KB update failed", tag: `updater-reply:${threadId}` },
+    async (tracker) => {
+      const result = await replyToUpdater(text, updaterSessionId, (line) => tracker.push(line));
+      if (result.sessionId) {
+        setUpdaterSessionId(threadId, result.sessionId);
       }
-      updaterMessageIds.set(tracker.messageId, threadId);
-    }
-  } catch (err) {
-    tracker.destroy();
-    console.error(`[updater-reply:${threadId}] FAILED:`, err);
-    const errMsg = err instanceof Error ? err.message : String(err);
-    await tracker.finish(`📝 KB update failed: ${errMsg.slice(0, 200)}`);
-  } finally {
-    updaterMutex.release();
-  }
+      if (!result.response || result.response === "NOTHING") {
+        await tracker.delete();
+      } else {
+        await tracker.finish(`✅ ${result.response}`);
+        if (updaterMessageIds.size > 500) {
+          updaterMessageIds.delete(updaterMessageIds.keys().next().value!);
+        }
+        updaterMessageIds.set(tracker.messageId, threadId);
+      }
+    },
+  );
 }
 
 // --- Sculptor analysis with streaming (shared by #sculptor trigger and daily schedule) ---
 
 async function runSculptorStreaming(chatId: number, replyToMsgId?: number): Promise<void> {
-  await updaterMutex.acquire();
+  await withTrackedMutex(
+    { api: bot.api, chatId, replyTo: replyToMsgId, label: "🔍 Running KB Sculptor analysis…", errorPrefix: "🔍 Sculptor analysis failed", tag: "sculptor" },
+    async (tracker) => {
+      const result = await runSculptorAnalysis((line) => tracker.push(line));
 
-  const tracker = await ProgressTracker.create(bot.api, chatId, replyToMsgId, "🔍 Running KB Sculptor analysis…");
+      const report = result.response || "(No analysis available)";
+      const sessionId = result.sessionId;
 
-  try {
-    const result = await runSculptorAnalysis((line) => tracker.push(line));
+      // Write pending.json so the approval flow works
+      await mkdir(SCULPTOR_DIR, { recursive: true });
+      const pendingData = {
+        session_id: sessionId,
+        timestamp: new Date().toISOString(),
+        status: "notified",
+        telegram_message_id: null as number | null,
+      };
 
-    tracker.destroy();
+      // Send the report as a new message (reply-to-approve target)
+      const footer = '\nReply to apply changes. Example: "apply all", "apply everything except X", or "skip"';
+      let text = report + footer;
+      if (text.length > 4000) {
+        text = report.slice(0, 4000 - footer.length - 20) + "\n\n(truncated)" + footer;
+      }
 
-    const report = result.response || "(No analysis available)";
-    const sessionId = result.sessionId;
+      const reportMsg = await bot.api.sendMessage(chatId, text);
 
-    // Write pending.json so the approval flow works
-    await mkdir(SCULPTOR_DIR, { recursive: true });
-    const pendingData = {
-      session_id: sessionId,
-      timestamp: new Date().toISOString(),
-      status: "notified",
-      telegram_message_id: null as number | null,
-    };
+      // Register for reply routing
+      if (sculptorMessageIds.size > 100) {
+        sculptorMessageIds.delete(sculptorMessageIds.keys().next().value!);
+      }
+      sculptorMessageIds.set(reportMsg.message_id, { sessionId });
 
-    // Send the report as a new message (reply-to-approve target)
-    const footer = '\nReply to apply changes. Example: "apply all", "apply everything except X", or "skip"';
-    let text = report + footer;
-    if (text.length > 4000) {
-      text = report.slice(0, 4000 - footer.length - 20) + "\n\n(truncated)" + footer;
-    }
+      pendingData.telegram_message_id = reportMsg.message_id;
+      await writeFile(SCULPTOR_PENDING, JSON.stringify(pendingData, null, 2));
 
-    const reportMsg = await bot.api.sendMessage(chatId, text);
-
-    // Register for reply routing
-    if (sculptorMessageIds.size > 100) {
-      sculptorMessageIds.delete(sculptorMessageIds.keys().next().value!);
-    }
-    sculptorMessageIds.set(reportMsg.message_id, { sessionId });
-
-    pendingData.telegram_message_id = reportMsg.message_id;
-    await writeFile(SCULPTOR_PENDING, JSON.stringify(pendingData, null, 2));
-
-    await tracker.finish("✅ Sculptor analysis complete. See report below.");
-
-    console.log(`[sculptor] Analysis complete, message_id=${reportMsg.message_id}`);
-  } catch (err) {
-    tracker.destroy();
-    console.error("[sculptor] Analysis failed:", err);
-    const errMsg = err instanceof Error ? err.message : String(err);
-    await tracker.finish(`🔍 Sculptor analysis failed: ${errMsg.slice(0, 200)}`);
-  } finally {
-    updaterMutex.release();
-  }
+      await tracker.finish("✅ Sculptor analysis complete. See report below.");
+      console.log(`[sculptor] Analysis complete, message_id=${reportMsg.message_id}`);
+    },
+  );
 }
 
 // --- Sculptor trigger via #sculptor ---
@@ -713,27 +692,14 @@ async function handleSculptorReply(ctx: Context, text: string, pending: { sessio
 
   console.log(`[sculptor] User replied: "${text.slice(0, 100)}", resuming session ${pending.sessionId.slice(0, 8)}`);
 
-  await updaterMutex.acquire();
-
-  const tracker = await ProgressTracker.create(ctx.api, ctx.chat!.id, msgId, "🔧 Applying sculptor changes…");
-
-  try {
-    const result = await executeSculptor(text, pending.sessionId, (line) => tracker.push(line));
-
-    tracker.destroy();
-
-    await tracker.finish(`✅ Sculptor: ${result.response || "Done"}`);
-
-    // Clean up pending file
-    await rm(SCULPTOR_PENDING).catch(() => {});
-  } catch (err) {
-    tracker.destroy();
-    console.error("[sculptor] Execution failed:", err);
-    const errMsg = err instanceof Error ? err.message : String(err);
-    await tracker.finish(`🔧 Sculptor failed: ${errMsg.slice(0, 200)}`);
-  } finally {
-    updaterMutex.release();
-  }
+  await withTrackedMutex(
+    { api: ctx.api, chatId: ctx.chat!.id, replyTo: msgId, label: "🔧 Applying sculptor changes…", errorPrefix: "🔧 Sculptor failed", tag: "sculptor-apply" },
+    async (tracker) => {
+      const result = await executeSculptor(text, pending.sessionId, (line) => tracker.push(line));
+      await tracker.finish(`✅ Sculptor: ${result.response || "Done"}`);
+      await rm(SCULPTOR_PENDING).catch(() => {});
+    },
+  );
 }
 
 // --- Message handlers ---

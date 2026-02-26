@@ -181,58 +181,6 @@ function topicPrefix(tag: string, text: string): string {
   return `[${tag}: ${truncate(topic, 30)}]`;
 }
 
-// --- Dynamic KB structure ---
-
-const EXCLUDED_DIRS = new Set([".git", ".venv", ".claude", ".kb-index", "node_modules", "uploads", "telegram-bot", "tools"]);
-
-async function getKBStructure(): Promise<string> {
-  const lines: string[] = [];
-
-  const entries = await readdir(CWD, { withFileTypes: true });
-
-  // Top-level .md files
-  const topFiles = entries
-    .filter((e) => e.isFile() && e.name.endsWith(".md"))
-    .map((e) => e.name)
-    .sort();
-  for (const f of topFiles) {
-    lines.push(`- ${f}`);
-  }
-
-  // Directories with .md files
-  const dirs = entries
-    .filter((e) => e.isDirectory() && !EXCLUDED_DIRS.has(e.name))
-    .sort((a, b) => a.name.localeCompare(b.name));
-
-  for (const dir of dirs) {
-    const dirPath = path.join(CWD, dir.name);
-    let title = dir.name;
-    try {
-      const indexContent = await readFile(path.join(dirPath, "_index.md"), "utf-8");
-      const firstLine = indexContent.split("\n")[0];
-      const h1Match = firstLine.match(/^#\s+(.+)/);
-      if (h1Match) title = h1Match[1];
-    } catch {
-      // No _index.md, use directory name
-    }
-
-    const dirEntries = await readdir(dirPath);
-    const mdFiles = dirEntries
-      .filter((f) => f.endsWith(".md") && f !== "_index.md")
-      .sort();
-
-    if (mdFiles.length > 10) {
-      const first = mdFiles[0];
-      const last = mdFiles[mdFiles.length - 1];
-      lines.push(`- ${dir.name}/ — ${title} (${mdFiles.length} files: ${first} … ${last})`);
-    } else {
-      lines.push(`- ${dir.name}/ — ${title} (${mdFiles.join(", ")})`);
-    }
-  }
-
-  return lines.join("\n");
-}
-
 // --- Context retrieval (two-step: search planner + chunk filter) ---
 
 interface KBChunk {
@@ -310,16 +258,23 @@ function splitMarkdownByH2(content: string, filename: string): KBChunk[] {
   return chunks;
 }
 
-async function runKBSearch(queryArgs: string): Promise<KBChunk[]> {
+interface KBSearchResult {
+  chunks: KBChunk[];
+  error?: string;
+}
+
+async function runKBSearch(queryArgs: string): Promise<KBSearchResult> {
   try {
     const { stdout } = await execAsync(`./kb-search ${queryArgs}`, {
       cwd: CWD,
       encoding: "utf-8",
       timeout: 15000,
     });
-    return parseKBSearchResults(stdout);
-  } catch {
-    return [];
+    return { chunks: parseKBSearchResults(stdout) };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[kb-search] Failed for ${queryArgs}: ${msg}`);
+    return { chunks: [], error: msg };
   }
 }
 
@@ -488,25 +443,8 @@ async function queryNoTools(
 
   onQueryCreated?.(response);
 
-  let result = "";
-  let finalSessionId = "";
-
-  for await (const message of response) {
-    if (abortController?.signal.aborted) break;
-    if (message.type === "system" && message.subtype === "init") {
-      finalSessionId = message.session_id;
-    }
-    if (message.type === "result" && message.subtype === "success") {
-      result = message.result;
-    }
-    if (!finalSessionId && "session_id" in message && message.session_id) {
-      finalSessionId = message.session_id;
-    }
-  }
-
-  if (abortController?.signal.aborted) throw new Error("Cancelled");
-
-  return { result: result.trim(), sessionId: finalSessionId };
+  const { response: result, sessionId: finalSessionId } = await consumeAgentStream(response, { abortController });
+  return { result, sessionId: finalSessionId };
 }
 
 export async function retrieveContext(
@@ -589,9 +527,12 @@ export async function retrieveContext(
   const t2 = Date.now();
   const searchResults = await Promise.all(
     queries.map(async q => {
-      const results = await runKBSearch(q);
-      log(`Search ${q} → ${results.length} chunks: ${results.map(c => c.id).join(", ")}`);
-      return results;
+      const { chunks, error } = await runKBSearch(q);
+      if (error) {
+        onProgress?.(`⚠️ Search failed: ${q}`);
+      }
+      log(`Search ${q} → ${chunks.length} chunks: ${chunks.map(c => c.id).join(", ")}${error ? ` (error: ${error.slice(0, 100)})` : ""}`);
+      return chunks;
     })
   );
   const searchMs = Date.now() - t2;
@@ -730,11 +671,10 @@ const UPDATER_TOOLS = [
   "Bash(find *)",
 ];
 
-function buildUpdaterPrompt(kbStructure: string): string {
+function buildUpdaterPrompt(): string {
   return `You are a knowledge base curator for David's personal knowledge base. Your job is to extract key information from David's messages and persist it to the KB.
 
-The knowledge base is in the current working directory (${CWD}). Structure:
-${kbStructure}
+The knowledge base is in the current working directory (${CWD}).
 
 **How to search:**
 - Run: ./kb-search "term1" "term2" "term3" — hybrid vector + keyword search across all KB files
@@ -792,8 +732,6 @@ export async function replyToUpdater(
 ): Promise<ClaudeResult> {
   const prompt = `David replies to your last KB update: "${text}"\n\nFollow his instruction.`;
 
-  const kbStructure = await getKBStructure();
-
   const response = query({
     prompt,
     options: {
@@ -801,7 +739,7 @@ export async function replyToUpdater(
       cwd: CWD,
       pathToClaudeCodeExecutable: CLAUDE_PATH,
       env: cleanEnv,
-      systemPrompt: buildUpdaterPrompt(kbStructure),
+      systemPrompt: buildUpdaterPrompt(),
       allowedTools: UPDATER_TOOLS,
       disallowedTools: ["Task", "WebSearch", "WebFetch"],
       maxTurns: 30,
@@ -897,8 +835,6 @@ export async function updateKnowledgeBase(
     ? `${aiContext}[David's message]\n"${text}"${diffContext}\n\nExtract any key new information. You already know what was previously processed.`
     : `${topicPrefix("KB Updater", text)} ${aiContext}[David's message]\n"${text}"${diffContext}\n\nExtract any key information worth persisting to the knowledge base.`;
 
-  const kbStructure = await getKBStructure();
-
   const response = query({
     prompt,
     options: {
@@ -906,7 +842,7 @@ export async function updateKnowledgeBase(
       cwd: CWD,
       pathToClaudeCodeExecutable: CLAUDE_PATH,
       env: cleanEnv,
-      systemPrompt: buildUpdaterPrompt(kbStructure),
+      systemPrompt: buildUpdaterPrompt(),
       allowedTools: UPDATER_TOOLS,
       disallowedTools: ["Task", "WebSearch", "WebFetch"],
       maxTurns: 30,

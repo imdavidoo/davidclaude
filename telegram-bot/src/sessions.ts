@@ -48,8 +48,9 @@ db.exec(`
   )
 `);
 
-// Clean up entries older than 1 day on startup
+// Clean up stale entries on startup
 db.exec(`DELETE FROM seen_updates WHERE seen_at < datetime('now', '-1 day')`);
+db.exec(`DELETE FROM sessions WHERE last_used_at < datetime('now', '-30 days')`);
 
 interface Session {
   session_id: string;
