@@ -41,36 +41,24 @@ Childhood left him feeling out of control and in pain → developed a coping mec
 - **The real world nourishes more than screens** — nature and physical engagement make him feel more alive
 
 ## Work philosophy
-- Wants to work from strategy, not fear. The fear that "if I don't push really hard, things will go wrong" is a signal to process first, then make deliberate decisions.
-- When recovering from work: not just recovering but investing in personal life. Needs to give himself permission to not think about work during rest.
-- The fear-driven obsession creates the very tension and anxiety that prevent clear strategic decisions and quality time with people.
+Works best from strategy, not fear. Rest = investing in personal life, not just recovering. See `growth/insights.md` for details.
 
 ## Energy & rest
-- Relaxes best with a balanced mix of full rest, gentle activity, and meaningful stimulation
-- Too much cognitive activity → burnout; too much rest → void/spiral
-- Full rest is helpful for emotional processing only when intentional and limited
-- Unstructured downtime is destabilizing — even loose structure helps
-- Cheap dopamine (YouTube, short-form content) almost always turns addictive: starts as inspiration, becomes default escape, creates disconnection
-- **Screen time rule**: allowed screen time = half the minutes exercised that day. Working well since ~Dec 2025. See `growth/techniques.md` for details.
-- **Crash pattern**: when sleep-deprived + emotionally overloaded + depleted, the system breaks down — skips workout, binges content, can't start tasks. Recognizes it, doesn't beat himself up about it, but it's a signal the foundation was gone. Recovery: sleep, lower expectations for the day, show up at 50%.
+- Needs balanced mix of rest, gentle activity, and stimulation — unstructured downtime is destabilizing
+- Screen time half-rule and energy management principles in `growth/techniques.md` and `growth/insights.md`
+- **Crash pattern**: sleep-deprived + emotionally overloaded + depleted → system breaks down. Recovery: sleep, lower expectations, show up at 50%.
 
 ## Empathy & connection
-- Social contact is deeply nourishing even when it triggers anxiety — makes him feel grounded, loved, stimulated. Worth actively seeking.
-- Empathy practice: shift from "what do I say next" to genuine presence. Listen, look, feel. Let there be a 2-second pause after someone finishes speaking. No need to think ahead.
-- Healthy empathy comes from relaxation and a grounded self, not from insecurity or approval-seeking.
-- Being with people naturally reveals who both people are — no techniques needed, just presence and attention.
-- Best gift to parents: spending time and connecting with them.
+- Social contact is deeply nourishing even when it triggers anxiety — worth actively seeking
+- Best gift to parents: spending time and connecting with them
+- See `growth/insights.md` for empathy and social connection principles
 
 ## Body signals
-- Listening to body signals is almost always right but can be difficult
-- Strong signals are gentle cues for small adjustments, not extreme commands (overwhelmed ≠ lie down all day; it means take a 10-second pause and have awareness)
-- When trying to slow down or listen inwardly, sometimes falls into anxiety/emptiness/self-doubt — trusting internal signals is a work in progress
-- "What do I need in the next few minutes?" is more manageable than deciding for a whole day
+Trusting body signals and intuition is a work in progress — see `growth/insights.md` for details.
 
-## Emotional regulation (Robert Greene — Laws of Human Nature)
-- When overtaken by strong, urgent, irrational emotion: do not act immediately. Step back, calm, let it pass, process, then decide from groundedness. Wise strategic action vs impulsive reaction.
-- Emotion is helpful as a signal but dangerous to act upon immediately. See it, use it, but from deliberate choice.
-- All humans have some narcissism. Those who lack an inner foundation of self-worth become dependent on external approval. Cultivating stable inner self-worth → less insecurity, less validation-seeking, more attention on what truly matters (work and relationships).
+## Emotional regulation
+- Uses the emotional pause for strong emotions — see `growth/techniques.md`
+- Cultivating stable inner self-worth → less insecurity, less validation-seeking, more attention on what truly matters (Robert Greene — Laws of Human Nature)
 
 ## Health, fitness & longevity
 - **Growing interest in health, longevity, nutrition, and sleep** — becoming a real focus area
