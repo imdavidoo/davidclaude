@@ -96,26 +96,49 @@ function truncate(s: string, max: number): string {
 }
 
 // Shared helper: consume an Agent SDK response stream, forward progress, return result
+interface StreamOptions {
+  onProgress?: (line: string) => void;
+  abortController?: AbortController;
+}
+
 async function consumeAgentStream(
   response: AsyncIterable<Record<string, unknown>>,
-  onProgress?: (line: string) => void,
-): Promise<UpdaterResult> {
+  opts?: StreamOptions,
+): Promise<ClaudeResult> {
+  const { onProgress, abortController } = opts ?? {};
   let finalSessionId = "";
   let result = "";
+  let permissionDenials: PermissionDenial[] = [];
 
   for await (const message of response) {
-    if ((message as { type: string; subtype?: string }).type === "system" && (message as { subtype?: string }).subtype === "init") {
-      finalSessionId = (message as { session_id: string }).session_id;
+    const msg = message as Record<string, unknown>;
+    if (abortController?.signal.aborted) break;
+
+    // Capture session ID from init message
+    if (msg.type === "system" && msg.subtype === "init") {
+      finalSessionId = msg.session_id as string;
     }
-    if ((message as { type: string }).type === "result") {
-      if ((message as { subtype?: string }).subtype === "success") {
-        result = (message as { result: string }).result;
+
+    // Capture result
+    if (msg.type === "result") {
+      const denials = (msg.permission_denials ?? []) as Array<{ tool_name: string; tool_use_id: string; tool_input: unknown }>;
+      permissionDenials = denials.map((d) => ({ toolName: d.tool_name, input: d.tool_input }));
+
+      if (msg.subtype === "success") {
+        result = msg.result as string;
+      } else {
+        const errors = (msg.errors ?? []) as string[];
+        result = `Error (${msg.subtype}): ${errors.join("\n") || "Unknown error"}`;
       }
     }
-    if (onProgress && (message as { type: string }).type === "assistant") {
-      const isTopLevel = (message as { parent_tool_use_id: string | null }).parent_tool_use_id === null;
-      const msg = (message as { message: { content?: Array<{ type: string; text?: string; name?: string; input?: Record<string, unknown> }> } }).message;
-      for (const block of msg.content ?? []) {
+
+    // Surface thinking + tool calls from assistant messages
+    if (onProgress && msg.type === "assistant") {
+      const isTopLevel = msg.parent_tool_use_id === null;
+      const content = ((msg.message as Record<string, unknown>)?.content ?? []) as Array<{
+        type: string; text?: string; name?: string; input?: Record<string, unknown>;
+      }>;
+      for (const block of content) {
         if (block.type === "text" && block.text && isTopLevel) {
           const t = block.text.trim();
           if (t) onProgress(`💭 ${truncate(t, 300)}`);
@@ -125,12 +148,28 @@ async function consumeAgentStream(
         }
       }
     }
-    if (!finalSessionId && "session_id" in message && (message as { session_id?: string }).session_id) {
-      finalSessionId = (message as { session_id: string }).session_id;
+
+    // Surface task lifecycle
+    if (onProgress && msg.type === "system") {
+      if (msg.subtype === "task_started") {
+        onProgress(`🚀 Agent started: ${(msg.description as string) ?? "task"}`);
+      }
+      if (msg.subtype === "task_notification") {
+        const icon = msg.status === "completed" ? "✅" : "❌";
+        const summary = truncate((msg.summary as string) ?? "", 300);
+        onProgress(`${icon} Agent ${(msg.status as string) ?? "done"}: ${summary}`);
+      }
+    }
+
+    // Fallback: grab session_id from any message
+    if (!finalSessionId && "session_id" in msg && msg.session_id) {
+      finalSessionId = msg.session_id as string;
     }
   }
 
-  return { sessionId: finalSessionId, result: result.trim() };
+  if (abortController?.signal.aborted) throw new Error("Cancelled");
+
+  return { response: result.trim(), sessionId: finalSessionId, permissionDenials };
 }
 
 function topicPrefix(tag: string, text: string): string {
@@ -418,6 +457,11 @@ const selectedChunksStore = new Map<string, Set<string>>();
 
 export function getSelectedChunks(filterSessionId: string): Set<string> {
   return selectedChunksStore.get(filterSessionId) ?? new Set();
+}
+
+/** Clear the selected chunks store (called periodically to prevent memory leaks). */
+export function clearSelectedChunksStore(): void {
+  selectedChunksStore.clear();
 }
 
 async function queryNoTools(
@@ -740,16 +784,12 @@ When an AI message is included for context, use it to assess how much weight Dav
 If nothing in the message is worth persisting, respond with exactly: NOTHING`;
 }
 
-export interface UpdaterResult {
-  sessionId: string;
-  result: string;
-}
 
 export async function replyToUpdater(
   text: string,
   sessionId: string,
   onProgress?: (line: string) => void,
-): Promise<UpdaterResult> {
+): Promise<ClaudeResult> {
   const prompt = `David replies to your last KB update: "${text}"\n\nFollow his instruction.`;
 
   const kbStructure = await getKBStructure();
@@ -770,14 +810,14 @@ export async function replyToUpdater(
     },
   });
 
-  return consumeAgentStream(response, onProgress);
+  return consumeAgentStream(response, { onProgress });
 }
 
 // --- Sculptor analysis (triggered via #sculptor in Telegram) ---
 
 export async function runSculptorAnalysis(
   onProgress?: (line: string) => void,
-): Promise<UpdaterResult> {
+): Promise<ClaudeResult> {
   const prompt = await readFile(path.join(CWD, "sculptor-prompt.md"), "utf-8");
 
   const response = query({
@@ -798,7 +838,7 @@ export async function runSculptorAnalysis(
     },
   });
 
-  return consumeAgentStream(response, onProgress);
+  return consumeAgentStream(response, { onProgress });
 }
 
 // --- Sculptor execution (resumes analysis session to apply approved changes) ---
@@ -807,7 +847,7 @@ export async function executeSculptor(
   userApproval: string,
   sessionId: string,
   onProgress?: (line: string) => void,
-): Promise<UpdaterResult> {
+): Promise<ClaudeResult> {
   const prompt = `David reviewed your recommendations and replied:
 
 "${userApproval}"
@@ -835,7 +875,7 @@ After all changes: run ./kb-index once, then git add and commit with message "KB
     },
   });
 
-  return consumeAgentStream(response, onProgress);
+  return consumeAgentStream(response, { onProgress });
 }
 
 export async function updateKnowledgeBase(
@@ -844,7 +884,7 @@ export async function updateKnowledgeBase(
   onProgress?: (line: string) => void,
   mainAgentDiff?: string | null,
   lastAIResponse?: string | null,
-): Promise<UpdaterResult> {
+): Promise<ClaudeResult> {
   const diffContext = mainAgentDiff
     ? `\n\nThe main assistant already handled David's explicit request and made these file changes:\n\`\`\`diff\n${mainAgentDiff}\n\`\`\`\nDo NOT duplicate these changes. Focus on any additional implicit knowledge (facts about people, preferences, plans, relationship dynamics, etc.) that wasn't already captured above.`
     : "";
@@ -875,7 +915,7 @@ export async function updateKnowledgeBase(
     },
   });
 
-  return consumeAgentStream(response, onProgress);
+  return consumeAgentStream(response, { onProgress });
 }
 
 // --- Main agent ---
@@ -923,80 +963,5 @@ Context retrieval:
 
   onQueryCreated?.(response);
 
-  let finalSessionId = "";
-  let result = "";
-  let permissionDenials: PermissionDenial[] = [];
-
-  for await (const message of response) {
-    if (abortController?.signal.aborted) break;
-
-    // Capture session ID from init message
-    if (message.type === "system" && message.subtype === "init") {
-      finalSessionId = message.session_id;
-    }
-
-    // Capture result
-    if (message.type === "result") {
-      permissionDenials = (message.permission_denials ?? []).map(
-        (d: { tool_name: string; tool_use_id: string; tool_input: unknown }) => ({
-          toolName: d.tool_name,
-          input: d.tool_input,
-        })
-      );
-
-      if (message.subtype === "success") {
-        result = message.result;
-      } else {
-        const errors = "errors" in message ? message.errors : [];
-        result = `Error (${message.subtype}): ${(errors as string[]).join("\n") || "Unknown error"}`;
-      }
-    }
-
-    // Surface thinking + tool calls from assistant messages
-    if (onProgress && message.type === "assistant") {
-      const isTopLevel = message.parent_tool_use_id === null;
-      const msg = message.message as {
-        content?: Array<{
-          type: string;
-          text?: string;
-          name?: string;
-          input?: Record<string, unknown>;
-        }>;
-      };
-      for (const block of msg.content ?? []) {
-        // Show thinking/reasoning text (top-level only to avoid sub-agent noise)
-        if (block.type === "text" && block.text && isTopLevel) {
-          const text = block.text.trim();
-          if (text) onProgress(`💭 ${truncate(text, 300)}`);
-        }
-        // Show tool calls (top-level only)
-        if (block.type === "tool_use" && block.name && block.input && isTopLevel) {
-          onProgress(formatToolUse(block as { name: string; input: Record<string, unknown> }));
-        }
-      }
-    }
-
-    // Surface task lifecycle
-    if (onProgress && message.type === "system") {
-      if (message.subtype === "task_started") {
-        const m = message as { description?: string; task_id?: string };
-        onProgress(`🚀 Agent started: ${m.description ?? "task"}`);
-      }
-      if (message.subtype === "task_notification") {
-        const m = message as { status?: string; summary?: string; task_id?: string };
-        const icon = m.status === "completed" ? "✅" : "❌";
-        const summary = truncate(m.summary ?? "", 300);
-        onProgress(`${icon} Agent ${m.status ?? "done"}: ${summary}`);
-      }
-    }
-
-    // Fallback: grab session_id from any message
-    if (!finalSessionId && "session_id" in message && message.session_id) {
-      finalSessionId = message.session_id;
-    }
-  }
-
-  if (abortController?.signal.aborted) throw new Error("Cancelled");
-
-  return { response: result, sessionId: finalSessionId, permissionDenials };
+  return consumeAgentStream(response, { onProgress, abortController });
 }
