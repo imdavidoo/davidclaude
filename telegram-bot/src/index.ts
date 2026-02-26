@@ -115,7 +115,6 @@ const updaterMessageIds = new Map<number, number>();
 
 const SCULPTOR_DIR = path.join(CWD, ".sculptor");
 const SCULPTOR_PENDING = path.join(SCULPTOR_DIR, "pending.json");
-const SCULPTOR_LATEST = path.join(SCULPTOR_DIR, "latest.md");
 const SCULPTOR_CHAT_ID = -1003881403661; // DavidOS Direct discussion group
 
 const sculptorMessageIds = new Map<number, { sessionId: string }>();
@@ -713,63 +712,13 @@ async function checkSculptorPending(): Promise<void> {
 
     if (data.status !== "pending_review") return;
 
-    // Read the human-readable report
-    let report = "";
-    try {
-      report = await readFile(SCULPTOR_LATEST, "utf-8");
-    } catch {
-      report = "(Report file not found)";
-    }
-
-    // Extract summary section
-    const summaryMatch = report.match(/## Summary\n([\s\S]*?)(?=\n## Recommendations|\n###)/);
-    const summary = summaryMatch?.[1]?.trim() ?? "Analysis complete.";
-
-    // Extract recommendation titles with type and priority
-    const recTitles: string[] = [];
-    const recPattern = /### (\d+)\. (.+)/g;
-    let match;
-    while ((match = recPattern.exec(report)) !== null) {
-      const num = match[1];
-      const title = match[2];
-      // Grab type and priority from lines after the title
-      const afterTitle = report.slice(match.index + match[0].length, match.index + match[0].length + 300);
-      const typeMatch = afterTitle.match(/\*\*Type\*\*:\s*(.+)/);
-      const prioMatch = afterTitle.match(/\*\*Priority\*\*:\s*(.+)/);
-      const type = typeMatch?.[1]?.trim() ?? "";
-      const prio = prioMatch?.[1]?.trim() ?? "";
-      const suffix = [type, prio].filter(Boolean).join(", ");
-      recTitles.push(`${num}. ${title}${suffix ? ` [${suffix}]` : ""}`);
-    }
-
-    const lines = [
-      "🔧 KB Sculptor Report",
-      "",
-      summary,
-      "",
-      "Recommendations:",
-      ...recTitles,
-      "",
-      'Reply to this message to apply changes.',
-      'Example: "apply 1, 3, 5" or "apply all" or "skip"',
-    ];
+    const report = data.report || "(No analysis available)";
+    const footer = '\nReply to apply changes. Example: "apply all", "apply everything except X", or "skip"';
 
     // Truncate if too long for Telegram (4096 char limit)
-    let text = lines.join("\n");
+    let text = report + footer;
     if (text.length > 4000) {
-      const truncated = recTitles.slice(0, 10);
-      text = [
-        "🔧 KB Sculptor Report",
-        "",
-        summary,
-        "",
-        "Recommendations:",
-        ...truncated,
-        `... and ${recTitles.length - 10} more (see full report)`,
-        "",
-        'Reply to this message to apply changes.',
-        'Example: "apply 1, 3, 5" or "apply all" or "skip"',
-      ].join("\n");
+      text = report.slice(0, 4000 - footer.length - 20) + "\n\n(truncated)" + footer;
     }
 
     const msg = await bot.api.sendMessage(SCULPTOR_CHAT_ID, text);

@@ -32,27 +32,26 @@ if ! RESULT=$(/home/imdavid/.local/bin/claude \
   exit 1
 fi
 
-# Extract session ID from JSON output
-if ! SESSION_ID=$(echo "$RESULT" | python3 -c "import sys, json; print(json.load(sys.stdin)['session_id'])" 2>/dev/null); then
-  echo "[$(date -Iseconds)] ERROR: Failed to parse session_id from output"
+# Extract session ID + report text, write pending.json
+if ! SESSION_ID=$(echo "$RESULT" | python3 -c "
+import sys, json
+from datetime import datetime, timezone
+result = json.load(sys.stdin)
+data = {
+    'session_id': result['session_id'],
+    'timestamp': datetime.now(timezone.utc).isoformat(),
+    'status': 'pending_review',
+    'telegram_message_id': None,
+    'report': result.get('result', ''),
+}
+with open('.sculptor/pending.json', 'w') as f:
+    json.dump(data, f, indent=2)
+print(result['session_id'])
+" 2>/dev/null); then
+  echo "[$(date -Iseconds)] ERROR: Failed to parse output"
   echo "$RESULT" | head -20
   exit 1
 fi
 
 echo "[$(date -Iseconds)] Analysis complete. Session: $SESSION_ID"
-
-# Write pending.json for the bot to pick up
-python3 -c "
-import json, sys
-from datetime import datetime, timezone
-data = {
-    'session_id': sys.argv[1],
-    'timestamp': datetime.now(timezone.utc).isoformat(),
-    'status': 'pending_review',
-    'telegram_message_id': None
-}
-with open('.sculptor/pending.json', 'w') as f:
-    json.dump(data, f, indent=2)
-" "$SESSION_ID"
-
 echo "[$(date -Iseconds)] Wrote .sculptor/pending.json — waiting for bot to send notification"

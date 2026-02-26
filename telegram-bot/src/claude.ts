@@ -786,27 +786,13 @@ export async function executeSculptor(
   sessionId: string,
   onProgress?: (line: string) => void,
 ): Promise<UpdaterResult> {
-  const prompt = `David reviewed your KB Sculptor recommendations and replied:
+  const prompt = `David reviewed your recommendations and replied:
 
 "${userApproval}"
 
-Apply the approved changes now.
+Apply the changes David approved. Read each file immediately before editing (your earlier reads may be stale).
 
-IMPORTANT workflow for editing:
-- Read a file immediately before editing it (your earlier reads are stale)
-- Edit one file at a time — read, then edit, then move to the next file
-- To delete a file, use: rm <path>
-
-After ALL changes:
-1. Run ./kb-index once
-2. Git add all changed/deleted .md files, then commit with message "KB Sculptor: <short summary>"
-
-If David said "apply all" or similar, apply all recommendations.
-If he specified numbers (e.g., "apply 1, 3, 5"), only apply those.
-If he said "skip" or similar, do nothing.
-If he gave additional context or instructions, follow them.
-
-After completing, output a brief summary of what was done.`;
+After all changes: run ./kb-index once, then git add and commit with message "KB Sculptor: <short summary>".`;
 
   const response = query({
     prompt,
