@@ -15,10 +15,7 @@ Three agents run per message (all in `telegram-bot/src/claude.ts`):
 
 ## KB Sculptor
 
-Daily scheduled KB maintenance (cron 17:00 NL). Analyzes the full KB for deduplication, condensation, structural issues, etc. Sends recommendations to Direct channel; David replies to approve.
-
-- Manual trigger: `./sculptor.sh >> .sculptor/cron.log 2>&1 &`
-- Config: `sculptor-prompt.md`, bot integration in `index.ts`/`claude.ts`
+Daily 17:00 NL (bot-internal timer) or `#sculptor` in Telegram. Analyzes KB, streams progress, David replies to approve changes. Config: `sculptor-prompt.md`.
 
 ## Key tools
 

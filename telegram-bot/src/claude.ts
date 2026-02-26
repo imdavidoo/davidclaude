@@ -5,13 +5,7 @@ import { promisify } from "util";
 
 const execAsync = promisify(exec);
 import path from "path";
-
-const CWD = "/home/imdavid/davidclaude";
-
-// Strip CLAUDECODE env var so the child process doesn't think it's nested
-const cleanEnv = Object.fromEntries(
-  Object.entries(process.env).filter(([k]) => k !== "CLAUDECODE")
-);
+import { CWD, CLAUDE_PATH, cleanEnv } from "./config";
 
 const ALLOWED_TOOLS = [
   "Read",
@@ -438,7 +432,7 @@ async function queryNoTools(
     options: {
       model: "claude-haiku-4-5",
       cwd: CWD,
-      pathToClaudeCodeExecutable: "/home/imdavid/.local/bin/claude",
+      pathToClaudeCodeExecutable: CLAUDE_PATH,
       env: cleanEnv,
       systemPrompt,
       allowedTools: [],
@@ -765,7 +759,7 @@ export async function replyToUpdater(
     options: {
       model: "claude-opus-4-6",
       cwd: CWD,
-      pathToClaudeCodeExecutable: "/home/imdavid/.local/bin/claude",
+      pathToClaudeCodeExecutable: CLAUDE_PATH,
       env: cleanEnv,
       systemPrompt: buildUpdaterPrompt(kbStructure),
       allowedTools: UPDATER_TOOLS,
@@ -791,7 +785,7 @@ export async function runSculptorAnalysis(
     options: {
       model: "claude-opus-4-6",
       cwd: CWD,
-      pathToClaudeCodeExecutable: "/home/imdavid/.local/bin/claude",
+      pathToClaudeCodeExecutable: CLAUDE_PATH,
       env: cleanEnv,
       allowedTools: [
         "Read", "Glob", "Grep", "Task",
@@ -827,7 +821,7 @@ After all changes: run ./kb-index once, then git add and commit with message "KB
     options: {
       model: "claude-opus-4-6",
       cwd: CWD,
-      pathToClaudeCodeExecutable: "/home/imdavid/.local/bin/claude",
+      pathToClaudeCodeExecutable: CLAUDE_PATH,
       env: cleanEnv,
       allowedTools: [
         ...UPDATER_TOOLS,
@@ -870,7 +864,7 @@ export async function updateKnowledgeBase(
     options: {
       model: "claude-opus-4-6",
       cwd: CWD,
-      pathToClaudeCodeExecutable: "/home/imdavid/.local/bin/claude",
+      pathToClaudeCodeExecutable: CLAUDE_PATH,
       env: cleanEnv,
       systemPrompt: buildUpdaterPrompt(kbStructure),
       allowedTools: UPDATER_TOOLS,
@@ -900,7 +894,7 @@ export async function sendMessage(
     prompt,
     options: {
       cwd: CWD,
-      pathToClaudeCodeExecutable: "/home/imdavid/.local/bin/claude",
+      pathToClaudeCodeExecutable: CLAUDE_PATH,
       env: cleanEnv,
       systemPrompt: {
         type: "preset",

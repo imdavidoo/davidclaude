@@ -65,6 +65,18 @@ export function getSession(threadId: number): Session | null {
   return row ?? null;
 }
 
+type SessionField = "retrieval_session_id" | "filter_session_id" | "updater_session_id";
+
+function setSessionField(threadId: number, field: SessionField, value: string): void {
+  db.prepare(
+    `INSERT INTO sessions (thread_id, session_id, ${field})
+     VALUES (?, '', ?)
+     ON CONFLICT(thread_id) DO UPDATE SET
+       ${field} = excluded.${field},
+       last_used_at = datetime('now')`
+  ).run(String(threadId), value);
+}
+
 export function setSessionId(threadId: number, sessionId: string): void {
   db.prepare(
     `INSERT INTO sessions (thread_id, session_id)
@@ -75,35 +87,9 @@ export function setSessionId(threadId: number, sessionId: string): void {
   ).run(String(threadId), sessionId);
 }
 
-export function setRetrievalSessionId(threadId: number, retrievalSessionId: string): void {
-  db.prepare(
-    `INSERT INTO sessions (thread_id, session_id, retrieval_session_id)
-     VALUES (?, '', ?)
-     ON CONFLICT(thread_id) DO UPDATE SET
-       retrieval_session_id = excluded.retrieval_session_id,
-       last_used_at = datetime('now')`
-  ).run(String(threadId), retrievalSessionId);
-}
-
-export function setFilterSessionId(threadId: number, filterSessionId: string): void {
-  db.prepare(
-    `INSERT INTO sessions (thread_id, session_id, filter_session_id)
-     VALUES (?, '', ?)
-     ON CONFLICT(thread_id) DO UPDATE SET
-       filter_session_id = excluded.filter_session_id,
-       last_used_at = datetime('now')`
-  ).run(String(threadId), filterSessionId);
-}
-
-export function setUpdaterSessionId(threadId: number, updaterSessionId: string): void {
-  db.prepare(
-    `INSERT INTO sessions (thread_id, session_id, updater_session_id)
-     VALUES (?, '', ?)
-     ON CONFLICT(thread_id) DO UPDATE SET
-       updater_session_id = excluded.updater_session_id,
-       last_used_at = datetime('now')`
-  ).run(String(threadId), updaterSessionId);
-}
+export const setRetrievalSessionId = (threadId: number, sid: string) => setSessionField(threadId, "retrieval_session_id", sid);
+export const setFilterSessionId = (threadId: number, sid: string) => setSessionField(threadId, "filter_session_id", sid);
+export const setUpdaterSessionId = (threadId: number, sid: string) => setSessionField(threadId, "updater_session_id", sid);
 
 export function isSeen(updateId: number): boolean {
   return !!db.prepare("SELECT 1 FROM seen_updates WHERE update_id = ?").get(updateId);

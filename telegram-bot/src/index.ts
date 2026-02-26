@@ -7,8 +7,8 @@ import { getChannelConfig, getAllowedChatIds } from "./channels";
 import { readFile, writeFile, mkdir, rm } from "fs/promises";
 import path from "path";
 import { execSync } from "child_process";
-
-const CWD = "/home/imdavid/davidclaude";
+import { CWD, UPLOAD_DIR } from "./config";
+import { ProgressTracker } from "./progress";
 
 // --- Config ---
 
@@ -131,78 +131,33 @@ function fireKBUpdate(ctx: Context, text: string, threadId: number, sessionId?: 
     await updaterMutex.acquire();
     console.log(`[updater:${threadId}] mutex acquired`);
 
-    const replyOpts = { reply_parameters: { message_id: threadId } };
-    let placeholder: { message_id: number } | null = null;
-    const progressLines: string[] = ["📝 Updating knowledge base…"];
-    let progressTimer: ReturnType<typeof setTimeout> | null = null;
-    let placeholderDead = false;
-
-    function flushUpdaterProgress() {
-      progressTimer = null;
-      if (!placeholder || placeholderDead || progressLines.length === 0) return;
-      let body = progressLines.join("\n");
-      while (body.length > 3800 && progressLines.length > 1) {
-        progressLines.shift();
-        body = "⋯ (earlier steps trimmed)\n" + progressLines.join("\n");
-      }
-      ctx.api
-        .editMessageText(ctx.chat!.id, placeholder.message_id, body)
-        .catch((err: Error) => {
-          const msg = err.message ?? "";
-          if (msg.includes("message is not modified") || msg.includes("message to edit not found")) {
-            if (msg.includes("not found")) placeholderDead = true;
-            return;
-          }
-        });
-    }
-
-    function onUpdaterProgress(line: string) {
-      progressLines.push(line);
-      if (!progressTimer) {
-        progressTimer = setTimeout(flushUpdaterProgress, 1500);
-      }
-    }
+    const tracker = await ProgressTracker.create(ctx.api, ctx.chat!.id, threadId, "📝 Updating knowledge base…");
 
     try {
-      placeholder = await ctx.reply("📝 Updating knowledge base…", replyOpts);
       console.log(`[updater:${threadId}] placeholder sent, calling updateKnowledgeBase...`);
-
-      const result = await updateKnowledgeBase(text, sessionId, onUpdaterProgress, mainAgentDiff, lastAIResponse);
+      const result = await updateKnowledgeBase(text, sessionId, (line) => tracker.push(line), mainAgentDiff, lastAIResponse);
       console.log(`[updater:${threadId}] updateKnowledgeBase returned: result="${result.result?.slice(0, 100)}", sessionId=${result.sessionId?.slice(0, 8)}`);
       if (result.sessionId) {
         setUpdaterSessionId(threadId, result.sessionId);
       }
 
-      if (progressTimer) clearTimeout(progressTimer);
+      tracker.destroy();
 
-      // If nothing was persisted, delete the placeholder
       if (!result.result || result.result === "NOTHING") {
-        if (placeholder) {
-          await ctx.api.deleteMessage(ctx.chat!.id, placeholder.message_id).catch(() => {});
-        }
+        await tracker.delete();
       } else {
-        // Show final summary (agent's last text output, not the progress log)
-        const summary = `✅ ${result.result}`;
-        if (placeholder && !placeholderDead) {
-          await ctx.api
-            .editMessageText(ctx.chat!.id, placeholder.message_id, summary.slice(0, 4000))
-            .catch(() => {});
-          // Register for reply routing
-          if (updaterMessageIds.size > 500) {
-            updaterMessageIds.delete(updaterMessageIds.keys().next().value!);
-          }
-          updaterMessageIds.set(placeholder.message_id, threadId);
+        await tracker.finish(`✅ ${result.result}`);
+        // Register for reply routing
+        if (updaterMessageIds.size > 500) {
+          updaterMessageIds.delete(updaterMessageIds.keys().next().value!);
         }
+        updaterMessageIds.set(tracker.messageId, threadId);
       }
     } catch (err) {
-      if (progressTimer) clearTimeout(progressTimer);
+      tracker.destroy();
       console.error(`[updater:${threadId}] KB update FAILED:`, err);
       const errMsg = err instanceof Error ? err.message : String(err);
-      if (placeholder && !placeholderDead) {
-        await ctx.api
-          .editMessageText(ctx.chat!.id, placeholder.message_id, `📝 KB update failed: ${errMsg.slice(0, 200)}`)
-          .catch(() => {});
-      }
+      await tracker.finish(`📝 KB update failed: ${errMsg.slice(0, 200)}`);
     } finally {
       updaterMutex.release();
     }
@@ -235,6 +190,10 @@ bot.use((ctx, next) => {
   return next();
 });
 
+function getThreadId(ctx: Context): number | undefined {
+  return ctx.msg?.is_automatic_forward ? ctx.msg.message_id : ctx.msg?.message_thread_id;
+}
+
 // --- Shared message handler ---
 
 async function handleMessage(ctx: Context, text: string): Promise<void> {
@@ -247,11 +206,7 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
   }
 
   const isAutoForward = ctx.msg?.is_automatic_forward === true;
-
-  const threadId = isAutoForward
-    ? ctx.msg!.message_id
-    : ctx.msg!.message_thread_id;
-
+  const threadId = getThreadId(ctx);
   if (!threadId) return;
 
   // Capture generation before acquiring mutex (for stop invalidation)
@@ -276,8 +231,9 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
 
   const replyOpts = { reply_parameters: { message_id: threadId } };
 
-  // Send placeholder
-  const placeholder = await ctx.reply("...", replyOpts);
+  // Send placeholder with progress tracking
+  const tracker = new ProgressTracker(ctx.api, ctx.chat!.id, (await ctx.reply("...", replyOpts)).message_id, { firstFlushDelay: 300 });
+  const onProgress = (line: string) => tracker.push(line);
 
   // Typing indicator every 4s
   const typingInterval = setInterval(() => {
@@ -287,41 +243,6 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
       })
       .catch(() => {});
   }, 4000);
-
-  // --- Live progress updates on placeholder ---
-  const progressLines: string[] = [];
-  let progressTimer: ReturnType<typeof setTimeout> | null = null;
-  let placeholderDead = false;
-
-  function flushProgress() {
-    progressTimer = null;
-    if (placeholderDead || progressLines.length === 0) return;
-    let body = progressLines.join("\n");
-    while (body.length > 3800 && progressLines.length > 1) {
-      progressLines.shift();
-      body = "⋯ (earlier steps trimmed)\n" + progressLines.join("\n");
-    }
-    ctx.api
-      .editMessageText(ctx.chat!.id, placeholder.message_id, body)
-      .catch((err: Error) => {
-        const msg = err.message ?? "";
-        if (
-          msg.includes("message is not modified") ||
-          msg.includes("message to edit not found")
-        ) {
-          if (msg.includes("not found")) placeholderDead = true;
-          return;
-        }
-      });
-  }
-
-  function onProgress(line: string) {
-    progressLines.push(line);
-    if (!progressTimer) {
-      const delay = progressLines.length === 1 ? 300 : 1500;
-      progressTimer = setTimeout(flushProgress, delay);
-    }
-  }
 
   const onQueryCreated = (q: { close(): void }) => {
     const handler = activeHandlers.get(threadId);
@@ -389,10 +310,7 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
       fireKBUpdate(ctx, text, threadId, kbSession?.updater_session_id, mainAgentDiff, result.response);
     }
 
-    if (progressTimer) clearTimeout(progressTimer);
-    await ctx.api
-      .deleteMessage(ctx.chat!.id, placeholder.message_id)
-      .catch(() => {});
+    await tracker.delete();
 
     const response = result.response || "(no response)";
     const htmlResponse = markdownToTelegramHtml(response);
@@ -420,10 +338,7 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
 
     console.log(`[thread:${threadId}] Total handler: ${Date.now() - tHandler}ms — ${text.slice(0, 50)}...`);
   } catch (err) {
-    if (progressTimer) clearTimeout(progressTimer);
-    await ctx.api
-      .deleteMessage(ctx.chat!.id, placeholder.message_id)
-      .catch(() => {});
+    await tracker.delete();
 
     if (abortController.signal.aborted) {
       console.log(`[thread:${threadId}] Stopped by user`);
@@ -433,6 +348,7 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
       console.error(`[thread:${threadId}] Error:`, err);
     }
   } finally {
+    tracker.destroy();
     clearInterval(typingInterval);
     activeHandlers.delete(threadId);
     mutex.release();
@@ -506,7 +422,7 @@ async function flushMediaGroup(mediaGroupId: string): Promise<void> {
 
 // --- Save image to disk for Claude to read directly ---
 
-const UPLOAD_DIR = "/home/imdavid/davidclaude/uploads";
+// UPLOAD_DIR imported from config.ts
 
 async function saveImage(fileId: string, ext: string): Promise<string> {
   await mkdir(UPLOAD_DIR, { recursive: true });
@@ -530,9 +446,7 @@ async function processImages(
   images: Array<{ fileId: string; mimeType: string }>,
   caption: string | undefined
 ): Promise<void> {
-  const threadId = ctx.msg?.is_automatic_forward
-    ? ctx.msg.message_id
-    : ctx.msg?.message_thread_id;
+  const threadId = getThreadId(ctx);
 
   if (!threadId) return;
 
@@ -581,9 +495,7 @@ async function processAudio(
   fileId: string,
   filename: string
 ): Promise<void> {
-  const threadId = ctx.msg?.is_automatic_forward
-    ? ctx.msg.message_id
-    : ctx.msg?.message_thread_id;
+  const threadId = getThreadId(ctx);
 
   if (!threadId) return;
 
@@ -630,75 +542,31 @@ async function handleUpdaterReply(ctx: Context, text: string, threadId: number):
   await updaterMutex.acquire();
   console.log(`[updater-reply:${threadId}] mutex acquired`);
 
-  const replyOpts = { reply_parameters: { message_id: threadId } };
-  let placeholder: { message_id: number } | null = null;
-  const progressLines: string[] = ["📝 Updating knowledge base…"];
-  let progressTimer: ReturnType<typeof setTimeout> | null = null;
-  let placeholderDead = false;
-
-  function flushProgress() {
-    progressTimer = null;
-    if (!placeholder || placeholderDead || progressLines.length === 0) return;
-    let body = progressLines.join("\n");
-    while (body.length > 3800 && progressLines.length > 1) {
-      progressLines.shift();
-      body = "⋯ (earlier steps trimmed)\n" + progressLines.join("\n");
-    }
-    ctx.api
-      .editMessageText(ctx.chat!.id, placeholder.message_id, body)
-      .catch((err: Error) => {
-        const msg = err.message ?? "";
-        if (msg.includes("message is not modified") || msg.includes("message to edit not found")) {
-          if (msg.includes("not found")) placeholderDead = true;
-          return;
-        }
-      });
-  }
-
-  function onProgress(line: string) {
-    progressLines.push(line);
-    if (!progressTimer) {
-      progressTimer = setTimeout(flushProgress, 1500);
-    }
-  }
+  const tracker = await ProgressTracker.create(ctx.api, ctx.chat!.id, threadId, "📝 Updating knowledge base…");
 
   try {
-    placeholder = await ctx.reply("📝 Updating knowledge base…", replyOpts);
-
-    const result = await replyToUpdater(text, updaterSessionId, onProgress);
+    const result = await replyToUpdater(text, updaterSessionId, (line) => tracker.push(line));
 
     if (result.sessionId) {
       setUpdaterSessionId(threadId, result.sessionId);
     }
 
-    if (progressTimer) clearTimeout(progressTimer);
+    tracker.destroy();
 
     if (!result.result || result.result === "NOTHING") {
-      if (placeholder) {
-        await ctx.api.deleteMessage(ctx.chat!.id, placeholder.message_id).catch(() => {});
-      }
+      await tracker.delete();
     } else {
-      const summary = `✅ ${result.result}`;
-      if (placeholder && !placeholderDead) {
-        await ctx.api
-          .editMessageText(ctx.chat!.id, placeholder.message_id, summary.slice(0, 4000))
-          .catch(() => {});
-        // Register for further replies
-        if (updaterMessageIds.size > 500) {
-          updaterMessageIds.delete(updaterMessageIds.keys().next().value!);
-        }
-        updaterMessageIds.set(placeholder.message_id, threadId);
+      await tracker.finish(`✅ ${result.result}`);
+      if (updaterMessageIds.size > 500) {
+        updaterMessageIds.delete(updaterMessageIds.keys().next().value!);
       }
+      updaterMessageIds.set(tracker.messageId, threadId);
     }
   } catch (err) {
-    if (progressTimer) clearTimeout(progressTimer);
+    tracker.destroy();
     console.error(`[updater-reply:${threadId}] FAILED:`, err);
     const errMsg = err instanceof Error ? err.message : String(err);
-    if (placeholder && !placeholderDead) {
-      await ctx.api
-        .editMessageText(ctx.chat!.id, placeholder.message_id, `📝 KB update failed: ${errMsg.slice(0, 200)}`)
-        .catch(() => {});
-    }
+    await tracker.finish(`📝 KB update failed: ${errMsg.slice(0, 200)}`);
   } finally {
     updaterMutex.release();
   }
@@ -825,57 +693,53 @@ async function handleSculptorTrigger(ctx: Context): Promise<void> {
   runSculptorStreaming(chatId, msgId);
 }
 
-// --- Sculptor notification poller ---
+// --- Sculptor: re-register pending messages on startup ---
 
-async function checkSculptorPending(): Promise<void> {
+(async () => {
   try {
     const raw = await readFile(SCULPTOR_PENDING, "utf-8");
     const data = JSON.parse(raw);
-
-    // On startup: re-register already-notified sculptor messages
     if (data.status === "notified" && data.telegram_message_id) {
-      if (!sculptorMessageIds.has(data.telegram_message_id)) {
-        sculptorMessageIds.set(data.telegram_message_id, { sessionId: data.session_id });
-        console.log(`[sculptor] Re-registered notified message_id=${data.telegram_message_id}`);
-      }
-      return;
+      sculptorMessageIds.set(data.telegram_message_id, { sessionId: data.session_id });
+      console.log(`[sculptor] Re-registered notified message_id=${data.telegram_message_id}`);
     }
-
-    if (data.status !== "pending_review") return;
-
-    const report = data.report || "(No analysis available)";
-    const footer = '\nReply to apply changes. Example: "apply all", "apply everything except X", or "skip"';
-
-    // Truncate if too long for Telegram (4096 char limit)
-    let text = report + footer;
-    if (text.length > 4000) {
-      text = report.slice(0, 4000 - footer.length - 20) + "\n\n(truncated)" + footer;
-    }
-
-    const msg = await bot.api.sendMessage(SCULPTOR_CHAT_ID, text);
-
-    // Track the message for reply routing
-    if (sculptorMessageIds.size > 100) {
-      sculptorMessageIds.delete(sculptorMessageIds.keys().next().value!);
-    }
-    sculptorMessageIds.set(msg.message_id, { sessionId: data.session_id });
-
-    // Update pending.json status
-    data.status = "notified";
-    data.telegram_message_id = msg.message_id;
-    await writeFile(SCULPTOR_PENDING, JSON.stringify(data, null, 2));
-
-    console.log(`[sculptor] Notification sent, message_id=${msg.message_id}`);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-      console.error("[sculptor] Error checking pending:", err);
-    }
+  } catch {
+    // No pending file — nothing to re-register
   }
+})();
+
+// --- Sculptor: daily scheduled run at 17:00 local time ---
+
+function scheduleDailySculptor(): void {
+  const now = new Date();
+  const target = new Date(now);
+  target.setHours(17, 0, 0, 0);
+  if (target <= now) target.setDate(target.getDate() + 1);
+
+  const ms = target.getTime() - now.getTime();
+  console.log(`[sculptor] Next daily run scheduled in ${Math.round(ms / 60_000)} minutes`);
+
+  setTimeout(async () => {
+    // Check if already pending
+    try {
+      const raw = await readFile(SCULPTOR_PENDING, "utf-8");
+      const data = JSON.parse(raw);
+      if (data.status === "pending_review" || data.status === "notified") {
+        console.log("[sculptor] Skipping daily run — analysis already pending");
+        scheduleDailySculptor();
+        return;
+      }
+    } catch {
+      // No pending file — proceed
+    }
+
+    console.log("[sculptor] Starting daily scheduled run");
+    runSculptorStreaming(SCULPTOR_CHAT_ID);
+    scheduleDailySculptor();
+  }, ms);
 }
 
-// Check on startup and every 60 seconds
-checkSculptorPending();
-setInterval(checkSculptorPending, 60_000);
+scheduleDailySculptor();
 
 // --- Sculptor reply handler ---
 

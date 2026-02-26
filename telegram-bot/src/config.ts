@@ -1,0 +1,10 @@
+import path from "path";
+
+export const CWD = "/home/imdavid/davidclaude";
+export const CLAUDE_PATH = "/home/imdavid/.local/bin/claude";
+export const UPLOAD_DIR = path.join(CWD, "uploads");
+
+// Strip CLAUDECODE env var so child processes don't think they're nested
+export const cleanEnv = Object.fromEntries(
+  Object.entries(process.env).filter(([k]) => k !== "CLAUDECODE")
+);
