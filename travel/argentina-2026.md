@@ -68,7 +68,6 @@
 ## Files
 - [Packing list](argentina-2026-packing.md)
 - [Hiking safety guide](argentina-2026-hiking-safety.md)
-- [Things to do](argentina-2026-activities.md)
 
 ## Planning & Research
 *(To be filled — restaurants, activities, safety tips, etc.)*

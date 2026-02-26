@@ -3,10 +3,8 @@
 | Person | File | Relationship |
 |--------|------|-------------|
 | Ira | `ira.md` | Girlfriend |
+| Family | `family.md` | Dad, Mom, Sister |
 | Tom | `tom.md` | Friend & co-founder (PetRadar) |
 | Fen | `fen.md` | Cousin |
 | Philip | `philip.md` | Friend (ex-colleague from Breeze) |
-
-## Others (details TBD)
-- **Family** — Dad, Mom, Sister
-- **Shan** — Sports buddy (with Philip and David)
+| Shan | `shan.md` | Sports buddy |

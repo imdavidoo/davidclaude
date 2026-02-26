@@ -10,7 +10,7 @@
 | The Mentalist | Series | Ira | Loved | Smart lead, fun watch. |
 | Jack Ryan | Series | Ira | Mixed | Cool lead character. Declined in quality over seasons. |
 
-## Want to Watch
+## Want to Watch — Argentina Trip 2026
 
 ### Series
 | Title | Why | Vibe |

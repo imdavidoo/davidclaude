@@ -20,11 +20,6 @@
 - **Config**: `telegram-bot/.env` — bot token, discussion group chat ID, allowed user IDs
 
 ## Work philosophy
-Wants to work from strategy, not fear — rest is investment in personal life. See `growth/insights.md` > Work & achievement for deeper context.
-
-## Files
-| File | Contents |
-|------|----------|
-| `career.md` | Career history — Breeze → PetRadar, career direction |
-| `business-ideas.md` | Business ideas under consideration |
-| `startup-insights.md` | Startup evaluation criteria and principles |
+- Wants to work from strategy, not fear (see `growth/insights.md` for deeper context)
+- Rest time is investment in personal life — give full permission to disconnect from work during off-hours
+- Fear-driven pushing creates the tension/anxiety that prevents the clear strategic thinking and quality connections he needs most
