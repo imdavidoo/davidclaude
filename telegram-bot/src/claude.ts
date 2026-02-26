@@ -84,9 +84,15 @@ function formatToolUse(block: { name: string; input: Record<string, unknown> }):
       return `✏️ Write ${shortPath(String(input.file_path ?? ""))}`;
     case "Edit":
       return `✏️ Edit ${shortPath(String(input.file_path ?? ""))}`;
+    case "TodoWrite":
+    case "TaskCreate":
+    case "TaskUpdate":
+    case "TaskList":
+      return `📋 ${name}`;
     default: {
       const firstVal = Object.values(input)[0];
-      return `🔧 ${name}: ${String(firstVal ?? "").slice(0, 100)}`;
+      const valStr = typeof firstVal === "object" ? JSON.stringify(firstVal).slice(0, 100) : String(firstVal ?? "").slice(0, 100);
+      return `🔧 ${name}: ${valStr}`;
     }
   }
 }
@@ -727,6 +733,95 @@ export async function replyToUpdater(
       allowedTools: UPDATER_TOOLS,
       disallowedTools: ["Task", "WebSearch", "WebFetch"],
       maxTurns: 30,
+      settingSources: ["project", "local"],
+      resume: sessionId,
+    },
+  });
+
+  let finalSessionId = "";
+  let result = "";
+
+  for await (const message of response) {
+    if (message.type === "system" && message.subtype === "init") {
+      finalSessionId = message.session_id;
+    }
+    if (message.type === "result") {
+      if (message.subtype === "success") {
+        result = message.result;
+      }
+    }
+    if (onProgress && message.type === "assistant") {
+      const isTopLevel = message.parent_tool_use_id === null;
+      const msg = message.message as {
+        content?: Array<{
+          type: string;
+          text?: string;
+          name?: string;
+          input?: Record<string, unknown>;
+        }>;
+      };
+      for (const block of msg.content ?? []) {
+        if (block.type === "text" && block.text && isTopLevel) {
+          const t = block.text.trim();
+          if (t) onProgress(`💭 ${truncate(t, 300)}`);
+        }
+        if (block.type === "tool_use" && block.name && block.input && isTopLevel) {
+          onProgress(formatToolUse(block as { name: string; input: Record<string, unknown> }));
+        }
+      }
+    }
+    if (!finalSessionId && "session_id" in message && message.session_id) {
+      finalSessionId = message.session_id;
+    }
+  }
+
+  return { sessionId: finalSessionId, result: result.trim() };
+}
+
+// --- Sculptor execution (resumes analysis session to apply approved changes) ---
+
+export async function executeSculptor(
+  userApproval: string,
+  sessionId: string,
+  onProgress?: (line: string) => void,
+): Promise<UpdaterResult> {
+  const prompt = `David reviewed your KB Sculptor recommendations and replied:
+
+"${userApproval}"
+
+Apply the approved changes now.
+
+IMPORTANT workflow for editing:
+- Read a file immediately before editing it (your earlier reads are stale)
+- Edit one file at a time — read, then edit, then move to the next file
+- To delete a file, use: rm <path> then git add <path> (to stage the deletion)
+- Do NOT use git rm (not available)
+
+After ALL changes:
+1. Run ./kb-index once
+2. Git add all changed/deleted .md files, then commit with message "KB Sculptor: <short summary>"
+
+If David said "apply all" or similar, apply all recommendations.
+If he specified numbers (e.g., "apply 1, 3, 5"), only apply those.
+If he said "skip" or similar, do nothing.
+If he gave additional context or instructions, follow them.
+
+After completing, output a brief summary of what was done.`;
+
+  const response = query({
+    prompt,
+    options: {
+      model: "claude-opus-4-6",
+      cwd: CWD,
+      pathToClaudeCodeExecutable: "/home/imdavid/.local/bin/claude",
+      env: cleanEnv,
+      allowedTools: [
+        ...UPDATER_TOOLS,
+        "Bash(rm *)",
+        "Bash(git rm *)",
+      ],
+      disallowedTools: ["Task", "WebSearch", "WebFetch"],
+      maxTurns: 50,
       settingSources: ["project", "local"],
       resume: sessionId,
     },

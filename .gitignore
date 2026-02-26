@@ -1,4 +1,5 @@
 .kb-index/
+.sculptor/
 .venv/
 __pycache__/
 *.pyc

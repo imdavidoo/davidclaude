@@ -1,10 +1,11 @@
 import { Bot, Context } from "grammy";
-import { sendMessage, retrieveContext, updateKnowledgeBase, replyToUpdater } from "./claude";
+import { sendMessage, retrieveContext, updateKnowledgeBase, replyToUpdater, executeSculptor } from "./claude";
 import { getSession, setSessionId, setRetrievalSessionId, setFilterSessionId, setUpdaterSessionId, isSeen, markSeen } from "./sessions";
 import { splitMessage, markdownToTelegramHtml } from "./telegram";
 import { transcribeAudio } from "./transcribe";
 import { getChannelConfig, getAllowedChatIds } from "./channels";
-import { writeFile, mkdir, rm } from "fs/promises";
+import { readFile, writeFile, mkdir, rm } from "fs/promises";
+import path from "path";
 import { execSync } from "child_process";
 
 const CWD = "/home/imdavid/davidclaude";
@@ -109,6 +110,15 @@ const updaterMutex = new Mutex();
 
 // Maps updater status message IDs -> thread IDs for reply routing
 const updaterMessageIds = new Map<number, number>();
+
+// --- KB Sculptor notification tracking ---
+
+const SCULPTOR_DIR = path.join(CWD, ".sculptor");
+const SCULPTOR_PENDING = path.join(SCULPTOR_DIR, "pending.json");
+const SCULPTOR_LATEST = path.join(SCULPTOR_DIR, "latest.md");
+const SCULPTOR_CHAT_ID = -1003881403661; // DavidOS Direct discussion group
+
+const sculptorMessageIds = new Map<number, { sessionId: string }>();
 
 function fireKBUpdate(ctx: Context, text: string, threadId: number, sessionId?: string | null, mainAgentDiff?: string | null, lastAIResponse?: string | null): void {
   console.log(`[updater:${threadId}] fireKBUpdate called`);
@@ -685,6 +695,188 @@ async function handleUpdaterReply(ctx: Context, text: string, threadId: number):
   }
 }
 
+// --- Sculptor notification poller ---
+
+async function checkSculptorPending(): Promise<void> {
+  try {
+    const raw = await readFile(SCULPTOR_PENDING, "utf-8");
+    const data = JSON.parse(raw);
+
+    // On startup: re-register already-notified sculptor messages
+    if (data.status === "notified" && data.telegram_message_id) {
+      if (!sculptorMessageIds.has(data.telegram_message_id)) {
+        sculptorMessageIds.set(data.telegram_message_id, { sessionId: data.session_id });
+        console.log(`[sculptor] Re-registered notified message_id=${data.telegram_message_id}`);
+      }
+      return;
+    }
+
+    if (data.status !== "pending_review") return;
+
+    // Read the human-readable report
+    let report = "";
+    try {
+      report = await readFile(SCULPTOR_LATEST, "utf-8");
+    } catch {
+      report = "(Report file not found)";
+    }
+
+    // Extract summary section
+    const summaryMatch = report.match(/## Summary\n([\s\S]*?)(?=\n## Recommendations|\n###)/);
+    const summary = summaryMatch?.[1]?.trim() ?? "Analysis complete.";
+
+    // Extract recommendation titles with type and priority
+    const recTitles: string[] = [];
+    const recPattern = /### (\d+)\. (.+)/g;
+    let match;
+    while ((match = recPattern.exec(report)) !== null) {
+      const num = match[1];
+      const title = match[2];
+      // Grab type and priority from lines after the title
+      const afterTitle = report.slice(match.index + match[0].length, match.index + match[0].length + 300);
+      const typeMatch = afterTitle.match(/\*\*Type\*\*:\s*(.+)/);
+      const prioMatch = afterTitle.match(/\*\*Priority\*\*:\s*(.+)/);
+      const type = typeMatch?.[1]?.trim() ?? "";
+      const prio = prioMatch?.[1]?.trim() ?? "";
+      const suffix = [type, prio].filter(Boolean).join(", ");
+      recTitles.push(`${num}. ${title}${suffix ? ` [${suffix}]` : ""}`);
+    }
+
+    const lines = [
+      "🔧 KB Sculptor Report",
+      "",
+      summary,
+      "",
+      "Recommendations:",
+      ...recTitles,
+      "",
+      'Reply to this message to apply changes.',
+      'Example: "apply 1, 3, 5" or "apply all" or "skip"',
+    ];
+
+    // Truncate if too long for Telegram (4096 char limit)
+    let text = lines.join("\n");
+    if (text.length > 4000) {
+      const truncated = recTitles.slice(0, 10);
+      text = [
+        "🔧 KB Sculptor Report",
+        "",
+        summary,
+        "",
+        "Recommendations:",
+        ...truncated,
+        `... and ${recTitles.length - 10} more (see full report)`,
+        "",
+        'Reply to this message to apply changes.',
+        'Example: "apply 1, 3, 5" or "apply all" or "skip"',
+      ].join("\n");
+    }
+
+    const msg = await bot.api.sendMessage(SCULPTOR_CHAT_ID, text);
+
+    // Track the message for reply routing
+    if (sculptorMessageIds.size > 100) {
+      sculptorMessageIds.delete(sculptorMessageIds.keys().next().value!);
+    }
+    sculptorMessageIds.set(msg.message_id, { sessionId: data.session_id });
+
+    // Update pending.json status
+    data.status = "notified";
+    data.telegram_message_id = msg.message_id;
+    await writeFile(SCULPTOR_PENDING, JSON.stringify(data, null, 2));
+
+    console.log(`[sculptor] Notification sent, message_id=${msg.message_id}`);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      console.error("[sculptor] Error checking pending:", err);
+    }
+  }
+}
+
+// Check on startup and every 60 seconds
+checkSculptorPending();
+setInterval(checkSculptorPending, 60_000);
+
+// --- Sculptor reply handler ---
+
+async function handleSculptorReply(ctx: Context, text: string, pending: { sessionId: string }): Promise<void> {
+  const msgId = ctx.msg!.message_id;
+
+  // "skip" means dismiss
+  if (text.trim().toLowerCase() === "skip") {
+    await ctx.reply("Sculptor recommendations dismissed.", {
+      reply_parameters: { message_id: msgId },
+    });
+    await rm(SCULPTOR_PENDING).catch(() => {});
+    return;
+  }
+
+  console.log(`[sculptor] User replied: "${text.slice(0, 100)}", resuming session ${pending.sessionId.slice(0, 8)}`);
+
+  await updaterMutex.acquire();
+
+  const replyOpts = { reply_parameters: { message_id: msgId } };
+  let placeholder: { message_id: number } | null = null;
+  const progressLines: string[] = ["🔧 Applying sculptor changes…"];
+  let progressTimer: ReturnType<typeof setTimeout> | null = null;
+  let placeholderDead = false;
+
+  function flushProgress() {
+    progressTimer = null;
+    if (!placeholder || placeholderDead || progressLines.length === 0) return;
+    let body = progressLines.join("\n");
+    while (body.length > 3800 && progressLines.length > 1) {
+      progressLines.shift();
+      body = "⋯ (earlier steps trimmed)\n" + progressLines.join("\n");
+    }
+    ctx.api
+      .editMessageText(ctx.chat!.id, placeholder.message_id, body)
+      .catch((err: Error) => {
+        const msg = err.message ?? "";
+        if (msg.includes("message is not modified") || msg.includes("message to edit not found")) {
+          if (msg.includes("not found")) placeholderDead = true;
+          return;
+        }
+      });
+  }
+
+  function onProgress(line: string) {
+    progressLines.push(line);
+    if (!progressTimer) {
+      progressTimer = setTimeout(flushProgress, 1500);
+    }
+  }
+
+  try {
+    placeholder = await ctx.reply("🔧 Applying sculptor changes…", replyOpts);
+
+    const result = await executeSculptor(text, pending.sessionId, onProgress);
+
+    if (progressTimer) clearTimeout(progressTimer);
+
+    const summary = `✅ Sculptor: ${result.result || "Done"}`;
+    if (placeholder && !placeholderDead) {
+      await ctx.api
+        .editMessageText(ctx.chat!.id, placeholder.message_id, summary.slice(0, 4000))
+        .catch(() => {});
+    }
+
+    // Clean up pending file
+    await rm(SCULPTOR_PENDING).catch(() => {});
+  } catch (err) {
+    if (progressTimer) clearTimeout(progressTimer);
+    console.error("[sculptor] Execution failed:", err);
+    const errMsg = err instanceof Error ? err.message : String(err);
+    if (placeholder && !placeholderDead) {
+      await ctx.api
+        .editMessageText(ctx.chat!.id, placeholder.message_id, `🔧 Sculptor failed: ${errMsg.slice(0, 200)}`)
+        .catch(() => {});
+    }
+  } finally {
+    updaterMutex.release();
+  }
+}
+
 // --- Message handlers ---
 
 bot.on("message:text", (ctx) => {
@@ -715,6 +907,10 @@ bot.on("message:text", (ctx) => {
   if (replyToMsgId && updaterMessageIds.has(replyToMsgId)) {
     const threadId = updaterMessageIds.get(replyToMsgId)!;
     handleUpdaterReply(ctx, ctx.msg.text, threadId);
+    return;
+  }
+  if (replyToMsgId && sculptorMessageIds.has(replyToMsgId)) {
+    handleSculptorReply(ctx, ctx.msg.text, sculptorMessageIds.get(replyToMsgId)!);
     return;
   }
   handleMessage(ctx, ctx.msg.text);
