@@ -95,6 +95,15 @@ function truncate(s: string, max: number): string {
   return s.length > max ? s.slice(0, max) + "…" : s;
 }
 
+function topicPrefix(tag: string, text: string): string {
+  const cleaned = text
+    .replace(/^\[User sent[^\]]*\]\s*/i, "")
+    .replace(/^\[Retrieved KB context\][\s\S]*?\[User message\]\s*/i, "")
+    .replace(/^Transcription:\s*/i, "");
+  const topic = cleaned.replace(/\s+/g, " ").trim().split(" ").slice(0, 4).join(" ");
+  return `[${tag}: ${truncate(topic, 30)}]`;
+}
+
 // --- Dynamic KB structure ---
 
 const EXCLUDED_DIRS = new Set([".git", ".venv", ".claude", ".kb-index", "node_modules", "uploads", "telegram-bot", "tools"]);
@@ -433,8 +442,8 @@ export async function retrieveContext(
 
   // --- Step 1: Ask planner for search queries ---
   const plannerPrompt = plannerSessionId
-    ? `New message from David:\n"${text}"\n\nAre there significantly new topics that need KB searches? If existing context covers this, respond: NONE\nOtherwise, output search queries (one per line).`
-    : `Message from David:\n"${text}"\n\nWhat background context would be useful? Output search queries.`;
+    ? `"${text}"\n\nAre there significantly new topics that need KB searches? If existing context covers this, respond: NONE\nOtherwise, output search queries (one per line).`
+    : `${topicPrefix("Retrieval", text)} "${text}"\n\nWhat background context would be useful? Output search queries.`;
 
   onProgress?.("🧠 Planning searches…");
   const t0 = Date.now();
@@ -538,7 +547,7 @@ export async function retrieveContext(
     .map(c => `[${c.id}]\n${createChunkPreview(c, keywords)}`)
     .join("\n\n---\n\n");
 
-  const filterPrompt = `User message:\n"${text}"\n\nChunks found (${newChunks.length} total, showing previews):\n\n${chunkList}\n\nWhich chunk IDs are relevant? Respond with one ID per line (format: "file.md §Section Name"). If none, respond: NONE`;
+  const filterPrompt = `${filterSessionId ? "" : topicPrefix("Filter", text) + " "}"${text}"\n\nChunks found (${newChunks.length} total, showing previews):\n\n${chunkList}\n\nWhich chunk IDs are relevant? Respond with one ID per line (format: "file.md §Section Name"). If none, respond: NONE`;
 
   log(`Sending ${newChunks.length} chunks to filter (IDs: ${newChunks.map(c => c.id).join(", ")})`);
   onProgress?.(`🧠 Filtering ${newChunks.length} chunks…`);
@@ -767,8 +776,8 @@ export async function updateKnowledgeBase(
     : "";
 
   const prompt = sessionId
-    ? `David sent a new message: "${text}"${diffContext}\n\nExtract any key new information. You already know what was previously processed.`
-    : `David said: "${text}"${diffContext}\n\nExtract any key information worth persisting to the knowledge base.`;
+    ? `"${text}"${diffContext}\n\nExtract any key new information. You already know what was previously processed.`
+    : `${topicPrefix("KB Updater", text)} "${text}"${diffContext}\n\nExtract any key information worth persisting to the knowledge base.`;
 
   const kbStructure = await getKBStructure();
 
@@ -843,8 +852,9 @@ export async function sendMessage(
   onQueryCreated?: (q: { close(): void }) => void,
   disallowedTools?: string[],
 ): Promise<ClaudeResult> {
+  const prompt = sessionId ? text : `${topicPrefix("Direct", text)} ${text}`;
   const response = query({
-    prompt: text,
+    prompt,
     options: {
       cwd: CWD,
       pathToClaudeCodeExecutable: "/home/imdavid/.local/bin/claude",
