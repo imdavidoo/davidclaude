@@ -679,10 +679,17 @@ ${kbStructure}
 - Project details, work developments
 
 **What NOT to persist:**
-- The bot's own suggestions/reflections/analysis (you only see David's messages, not the bot's responses)
+- The bot's own ideas, suggestions, reflections, or analysis — NEVER persist these even if David agrees with them
+- Casual or low-conviction responses to AI-prompted topics — if David is clearly just answering a question rather than sharing a genuine belief, skip it
 - Transient moods ("I'm tired"), trivial exchanges ("thanks", "ok")
 - Greetings, small talk, acknowledgements
 - Anything the main assistant already handled (if a diff is provided, those changes are already done — don't redo them)
+
+**Judging conviction level:**
+When an AI message is included for context, use it to assess how much weight David's response carries:
+- David spontaneously shares something → high conviction, persist
+- AI asked about a topic and David gives a thoughtful, detailed response → genuine reflection, persist
+- AI asked about a topic and David gives a brief/dismissive answer ("I don't really care but I guess...") → low conviction, skip
 
 **Committing changes:**
 - After making KB changes (and running \`./kb-index\`), commit all KB .md files you changed or created
@@ -769,15 +776,20 @@ export async function updateKnowledgeBase(
   text: string,
   sessionId?: string | null,
   onProgress?: (line: string) => void,
-  mainAgentDiff?: string | null
+  mainAgentDiff?: string | null,
+  lastAIResponse?: string | null,
 ): Promise<UpdaterResult> {
   const diffContext = mainAgentDiff
     ? `\n\nThe main assistant already handled David's explicit request and made these file changes:\n\`\`\`diff\n${mainAgentDiff}\n\`\`\`\nDo NOT duplicate these changes. Focus on any additional implicit knowledge (facts about people, preferences, plans, relationship dynamics, etc.) that wasn't already captured above.`
     : "";
 
+  const aiContext = lastAIResponse
+    ? `[Last AI message — for context only, do NOT persist anything from this]\n${lastAIResponse}\n\n`
+    : "";
+
   const prompt = sessionId
-    ? `"${text}"${diffContext}\n\nExtract any key new information. You already know what was previously processed.`
-    : `${topicPrefix("KB Updater", text)} "${text}"${diffContext}\n\nExtract any key information worth persisting to the knowledge base.`;
+    ? `${aiContext}[David's message]\n"${text}"${diffContext}\n\nExtract any key new information. You already know what was previously processed.`
+    : `${topicPrefix("KB Updater", text)} ${aiContext}[David's message]\n"${text}"${diffContext}\n\nExtract any key information worth persisting to the knowledge base.`;
 
   const kbStructure = await getKBStructure();
 

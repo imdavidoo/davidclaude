@@ -110,7 +110,7 @@ const updaterMutex = new Mutex();
 // Maps updater status message IDs -> thread IDs for reply routing
 const updaterMessageIds = new Map<number, number>();
 
-function fireKBUpdate(ctx: Context, text: string, threadId: number, sessionId?: string | null, mainAgentDiff?: string | null): void {
+function fireKBUpdate(ctx: Context, text: string, threadId: number, sessionId?: string | null, mainAgentDiff?: string | null, lastAIResponse?: string | null): void {
   console.log(`[updater:${threadId}] fireKBUpdate called`);
   (async () => {
     console.log(`[updater:${threadId}] waiting for mutex...`);
@@ -153,7 +153,7 @@ function fireKBUpdate(ctx: Context, text: string, threadId: number, sessionId?: 
       placeholder = await ctx.reply("📝 Updating knowledge base…", replyOpts);
       console.log(`[updater:${threadId}] placeholder sent, calling updateKnowledgeBase...`);
 
-      const result = await updateKnowledgeBase(text, sessionId, onUpdaterProgress, mainAgentDiff);
+      const result = await updateKnowledgeBase(text, sessionId, onUpdaterProgress, mainAgentDiff, lastAIResponse);
       console.log(`[updater:${threadId}] updateKnowledgeBase returned: result="${result.result?.slice(0, 100)}", sessionId=${result.sessionId?.slice(0, 8)}`);
       if (result.sessionId) {
         setUpdaterSessionId(threadId, result.sessionId);
@@ -367,7 +367,7 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
     }
     if (!skipKBUpdate) {
       const kbSession = getSession(threadId);
-      fireKBUpdate(ctx, text, threadId, kbSession?.updater_session_id, mainAgentDiff);
+      fireKBUpdate(ctx, text, threadId, kbSession?.updater_session_id, mainAgentDiff, result.response);
     }
 
     if (progressTimer) clearTimeout(progressTimer);
