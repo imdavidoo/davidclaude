@@ -1,5 +1,7 @@
 # Hiking Safety — Patagonia & Bariloche
 
+See also `sports/_index.md` > Hiking & trail running for David's trail running preferences and insights from these hikes.
+
 ## The #1 Rule
 **Start early.** Before 6 AM for big hikes. Morning = calmer wind, clearer skies, fewer people. Patagonia weather deteriorates through the day.
 

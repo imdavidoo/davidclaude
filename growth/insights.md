@@ -13,9 +13,7 @@ Learnings David has identified about how he works best. These are hypotheses and
 ## Social connection
 - Social contact is deeply nourishing even when it triggers anxiety — makes him grounded, loved, stimulated, and he learns from people. Worth actively seeking.
 - Challenges in social situations come from constricting/tensing/shrinking when self-doubt kicks in, not from lack of skill
-- When safe and valued: naturally warm, soft, humorous, fun, easy to be around
-- Gravitates toward light, friendly, non-judgmental people — wants to grow toward being that kind of person
-- Tendency to imagine others' expectations and feel pressure to fulfill them before they're expressed → healthier to stay neutral and choose deliberately
+- See `david.md` > Social self for personality descriptions
 
 ## Empathy (healthy version)
 - Not about asking many questions or going deep on purpose — it's about genuine attention: listening, looking, feeling with presence
@@ -83,9 +81,8 @@ A recurring pattern David keeps rediscovering across different life domains. Man
 **The key distinction** (connects to Robert Greene): Worry/fear can *inform* you, but it shouldn't *make the decision* or take you over. See it, use it, act from groundedness — don't be lived by it.
 
 **Live examples**:
-- Steep mountain descent in Patagonia (Feb 2026): panicked at the top (hard wind, rain, very steep), but going down was surprisingly manageable — less wind, less rain, not as steep as feared. The fear at the top was far worse than the reality.
-- Previous Patagonia hike: thought he could do 15-20km, ended up doing 38-40km. Pain decreased when he committed instead of worrying. (See "Body & intuition" below)
-- Work anxiety while on holiday (Feb 2026): feeling tension about returning — afraid of unhappiness and conflicts. Recognized this as the same pattern: worrying from the mountain-top about a descent that may be fine. Not serving him to worry now when he has no idea what it'll actually be like.
+- Steep mountain descent and 38-40km hike in Patagonia — details in Body & intuition above
+- Work anxiety while on holiday (Feb 2026): feeling tension about returning — afraid of unhappiness and conflicts. Recognized this as the same pattern: worrying from the mountain-top about a descent that may be fine.
 
 **Related sections**: Hank amplifies this (see above). Body & intuition shows the physical dimension. Work & achievement shows the career dimension.
 
