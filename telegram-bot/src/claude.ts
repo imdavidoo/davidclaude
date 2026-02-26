@@ -772,18 +772,14 @@ export async function runSculptorAnalysis(
 // --- Sculptor execution (resumes analysis session to apply approved changes) ---
 
 export async function executeSculptor(
-  userApproval: string,
+  userMessage: string,
   sessionId: string,
   onProgress?: (line: string) => void,
 ): Promise<ClaudeResult> {
   return invokeAgent({
-    prompt: `David reviewed your recommendations and replied:
+    prompt: `David replied: "${userMessage}"
 
-"${userApproval}"
-
-Apply the changes David approved. Read each file immediately before editing (your earlier reads may be stale).
-
-After all changes: run ./kb-index once, then git add and commit with message "KB Sculptor: <short summary>".`,
+If applying changes, re-read files before editing (they may have changed). After all changes, run ./kb-index and git commit with message "KB Sculptor: <short summary>".`,
     model: MODELS.sculptor,
     allowedTools: [...UPDATER_TOOLS, "Bash(rm *)", "Bash(git rm *)"],
     disallowedTools: ["Task", "WebSearch", "WebFetch"],

@@ -109,9 +109,10 @@ export async function handleSculptorReply(ctx: Context, text: string, pending: {
   const msgId = ctx.msg!.message_id;
   const replyToId = ctx.msg!.reply_to_message!.message_id;
 
-  // "skip" means dismiss
-  if (text.trim().toLowerCase() === "skip") {
-    await ctx.reply("Sculptor recommendations dismissed.", {
+  // "skip" or "done" ends the session
+  const lower = text.trim().toLowerCase();
+  if (lower === "skip" || lower === "done") {
+    await ctx.reply("Sculptor session ended.", {
       reply_parameters: { message_id: msgId },
     });
     sculptorMessageIds.delete(replyToId);
@@ -122,12 +123,25 @@ export async function handleSculptorReply(ctx: Context, text: string, pending: {
   console.log(`[sculptor] User replied: "${text.slice(0, 100)}", resuming session ${pending.sessionId.slice(0, 8)}`);
 
   await withTrackedMutex(
-    { api: ctx.api, chatId: ctx.chat!.id, replyTo: msgId, label: "🔧 Applying sculptor changes…", errorPrefix: "🔧 Sculptor failed", tag: "sculptor-apply" },
+    { api: ctx.api, chatId: ctx.chat!.id, replyTo: msgId, label: "🔧 Sculptor working…", errorPrefix: "🔧 Sculptor failed", tag: "sculptor-apply" },
     async (tracker) => {
       const result = await executeSculptor(text, pending.sessionId, (line) => tracker.push(line));
-      await tracker.finish(`✅ Sculptor: ${result.response || "Done"}`);
+
+      // Clean up old entry
       sculptorMessageIds.delete(replyToId);
       await removePendingEntry(replyToId);
+
+      // Send response and register for further replies
+      const response = result.response || "Done.";
+      await tracker.finish("✅ Sculptor responded.");
+      const responseMsg = await ctx.reply(response, {
+        reply_parameters: { message_id: msgId },
+      });
+
+      // Register new message so David can keep the conversation going
+      sculptorMessageIds.set(responseMsg.message_id, { sessionId: result.sessionId });
+      await savePendingEntry(responseMsg.message_id, result.sessionId);
+      console.log(`[sculptor] Response sent, message_id=${responseMsg.message_id} registered for follow-up`);
     },
   );
 }

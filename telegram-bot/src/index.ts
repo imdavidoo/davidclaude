@@ -132,6 +132,18 @@ bot.use((ctx, next) => {
 // --- Shared message handler ---
 
 async function handleMessage(ctx: Context, text: string): Promise<void> {
+  // --- Reply routing: sculptor/updater replies bypass normal flow ---
+  const replyToMsgId = ctx.msg?.reply_to_message?.message_id;
+  if (replyToMsgId && isUpdaterMessage(replyToMsgId)) {
+    const threadId = getUpdaterThreadId(replyToMsgId);
+    handleUpdaterReply(ctx, text, threadId, handleMessage);
+    return;
+  }
+  if (replyToMsgId && isSculptorMessage(replyToMsgId)) {
+    handleSculptorReply(ctx, text, getSculptorPending(replyToMsgId));
+    return;
+  }
+
   const { cleaned, flags } = parseFlags(text);
   text = cleaned;
 
@@ -316,16 +328,6 @@ bot.on("message:text", (ctx) => {
   }
 
   // --- Normal message routing (fire-and-forget so Grammy can process "stop" immediately) ---
-  const replyToMsgId = ctx.msg.reply_to_message?.message_id;
-  if (replyToMsgId && isUpdaterMessage(replyToMsgId)) {
-    const threadId = getUpdaterThreadId(replyToMsgId);
-    handleUpdaterReply(ctx, ctx.msg.text, threadId, handleMessage);
-    return;
-  }
-  if (replyToMsgId && isSculptorMessage(replyToMsgId)) {
-    handleSculptorReply(ctx, ctx.msg.text, getSculptorPending(replyToMsgId));
-    return;
-  }
   handleMessage(ctx, ctx.msg.text);
 });
 
