@@ -101,6 +101,44 @@ function truncate(s: string, max: number): string {
   return s.length > max ? s.slice(0, max) + "…" : s;
 }
 
+// Shared helper: consume an Agent SDK response stream, forward progress, return result
+async function consumeAgentStream(
+  response: AsyncIterable<Record<string, unknown>>,
+  onProgress?: (line: string) => void,
+): Promise<UpdaterResult> {
+  let finalSessionId = "";
+  let result = "";
+
+  for await (const message of response) {
+    if ((message as { type: string; subtype?: string }).type === "system" && (message as { subtype?: string }).subtype === "init") {
+      finalSessionId = (message as { session_id: string }).session_id;
+    }
+    if ((message as { type: string }).type === "result") {
+      if ((message as { subtype?: string }).subtype === "success") {
+        result = (message as { result: string }).result;
+      }
+    }
+    if (onProgress && (message as { type: string }).type === "assistant") {
+      const isTopLevel = (message as { parent_tool_use_id: string | null }).parent_tool_use_id === null;
+      const msg = (message as { message: { content?: Array<{ type: string; text?: string; name?: string; input?: Record<string, unknown> }> } }).message;
+      for (const block of msg.content ?? []) {
+        if (block.type === "text" && block.text && isTopLevel) {
+          const t = block.text.trim();
+          if (t) onProgress(`💭 ${truncate(t, 300)}`);
+        }
+        if (block.type === "tool_use" && block.name && block.input && isTopLevel) {
+          onProgress(formatToolUse(block as { name: string; input: Record<string, unknown> }));
+        }
+      }
+    }
+    if (!finalSessionId && "session_id" in message && (message as { session_id?: string }).session_id) {
+      finalSessionId = (message as { session_id: string }).session_id;
+    }
+  }
+
+  return { sessionId: finalSessionId, result: result.trim() };
+}
+
 function topicPrefix(tag: string, text: string): string {
   const cleaned = text
     .replace(/^\[User sent[^\]]*\]\s*/i, "")
@@ -738,44 +776,7 @@ export async function replyToUpdater(
     },
   });
 
-  let finalSessionId = "";
-  let result = "";
-
-  for await (const message of response) {
-    if (message.type === "system" && message.subtype === "init") {
-      finalSessionId = message.session_id;
-    }
-    if (message.type === "result") {
-      if (message.subtype === "success") {
-        result = message.result;
-      }
-    }
-    if (onProgress && message.type === "assistant") {
-      const isTopLevel = message.parent_tool_use_id === null;
-      const msg = message.message as {
-        content?: Array<{
-          type: string;
-          text?: string;
-          name?: string;
-          input?: Record<string, unknown>;
-        }>;
-      };
-      for (const block of msg.content ?? []) {
-        if (block.type === "text" && block.text && isTopLevel) {
-          const t = block.text.trim();
-          if (t) onProgress(`💭 ${truncate(t, 300)}`);
-        }
-        if (block.type === "tool_use" && block.name && block.input && isTopLevel) {
-          onProgress(formatToolUse(block as { name: string; input: Record<string, unknown> }));
-        }
-      }
-    }
-    if (!finalSessionId && "session_id" in message && message.session_id) {
-      finalSessionId = message.session_id;
-    }
-  }
-
-  return { sessionId: finalSessionId, result: result.trim() };
+  return consumeAgentStream(response, onProgress);
 }
 
 // --- Sculptor execution (resumes analysis session to apply approved changes) ---
@@ -794,8 +795,7 @@ Apply the approved changes now.
 IMPORTANT workflow for editing:
 - Read a file immediately before editing it (your earlier reads are stale)
 - Edit one file at a time — read, then edit, then move to the next file
-- To delete a file, use: rm <path> then git add <path> (to stage the deletion)
-- Do NOT use git rm (not available)
+- To delete a file, use: rm <path>
 
 After ALL changes:
 1. Run ./kb-index once
@@ -827,44 +827,7 @@ After completing, output a brief summary of what was done.`;
     },
   });
 
-  let finalSessionId = "";
-  let result = "";
-
-  for await (const message of response) {
-    if (message.type === "system" && message.subtype === "init") {
-      finalSessionId = message.session_id;
-    }
-    if (message.type === "result") {
-      if (message.subtype === "success") {
-        result = message.result;
-      }
-    }
-    if (onProgress && message.type === "assistant") {
-      const isTopLevel = message.parent_tool_use_id === null;
-      const msg = message.message as {
-        content?: Array<{
-          type: string;
-          text?: string;
-          name?: string;
-          input?: Record<string, unknown>;
-        }>;
-      };
-      for (const block of msg.content ?? []) {
-        if (block.type === "text" && block.text && isTopLevel) {
-          const t = block.text.trim();
-          if (t) onProgress(`💭 ${truncate(t, 300)}`);
-        }
-        if (block.type === "tool_use" && block.name && block.input && isTopLevel) {
-          onProgress(formatToolUse(block as { name: string; input: Record<string, unknown> }));
-        }
-      }
-    }
-    if (!finalSessionId && "session_id" in message && message.session_id) {
-      finalSessionId = message.session_id;
-    }
-  }
-
-  return { sessionId: finalSessionId, result: result.trim() };
+  return consumeAgentStream(response, onProgress);
 }
 
 export async function updateKnowledgeBase(
@@ -904,48 +867,7 @@ export async function updateKnowledgeBase(
     },
   });
 
-  let finalSessionId = "";
-  let result = "";
-
-  for await (const message of response) {
-    if (message.type === "system" && message.subtype === "init") {
-      finalSessionId = message.session_id;
-    }
-
-    if (message.type === "result") {
-      if (message.subtype === "success") {
-        result = message.result;
-      }
-    }
-
-    // Forward progress events
-    if (onProgress && message.type === "assistant") {
-      const isTopLevel = message.parent_tool_use_id === null;
-      const msg = message.message as {
-        content?: Array<{
-          type: string;
-          text?: string;
-          name?: string;
-          input?: Record<string, unknown>;
-        }>;
-      };
-      for (const block of msg.content ?? []) {
-        if (block.type === "text" && block.text && isTopLevel) {
-          const t = block.text.trim();
-          if (t) onProgress(`💭 ${truncate(t, 300)}`);
-        }
-        if (block.type === "tool_use" && block.name && block.input && isTopLevel) {
-          onProgress(formatToolUse(block as { name: string; input: Record<string, unknown> }));
-        }
-      }
-    }
-
-    if (!finalSessionId && "session_id" in message && message.session_id) {
-      finalSessionId = message.session_id;
-    }
-  }
-
-  return { sessionId: finalSessionId, result: result.trim() };
+  return consumeAgentStream(response, onProgress);
 }
 
 // --- Main agent ---

@@ -22,15 +22,22 @@ unset CLAUDECODE 2>/dev/null || true
 echo "[$(date -Iseconds)] Starting KB Sculptor analysis..."
 
 # Run Claude Code in print mode with JSON output
-RESULT=$(/home/imdavid/.local/bin/claude \
+if ! RESULT=$(/home/imdavid/.local/bin/claude \
   -p "$PROMPT" \
   --output-format json \
   --dangerously-skip-permissions \
   --model claude-opus-4-6 \
-  2>/dev/null)
+  2>/dev/null); then
+  echo "[$(date -Iseconds)] ERROR: claude -p failed"
+  exit 1
+fi
 
-# Extract session ID and result from JSON output
-SESSION_ID=$(echo "$RESULT" | python3 -c "import sys, json; print(json.load(sys.stdin)['session_id'])")
+# Extract session ID from JSON output
+if ! SESSION_ID=$(echo "$RESULT" | python3 -c "import sys, json; print(json.load(sys.stdin)['session_id'])" 2>/dev/null); then
+  echo "[$(date -Iseconds)] ERROR: Failed to parse session_id from output"
+  echo "$RESULT" | head -20
+  exit 1
+fi
 
 echo "[$(date -Iseconds)] Analysis complete. Session: $SESSION_ID"
 
