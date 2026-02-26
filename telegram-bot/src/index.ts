@@ -1,5 +1,5 @@
 import { Bot, Context } from "grammy";
-import { sendMessage, retrieveContext, updateKnowledgeBase, replyToUpdater, executeSculptor } from "./claude";
+import { sendMessage, retrieveContext, updateKnowledgeBase, replyToUpdater, executeSculptor, runSculptorAnalysis } from "./claude";
 import { getSession, setSessionId, setRetrievalSessionId, setFilterSessionId, setUpdaterSessionId, isSeen, markSeen } from "./sessions";
 import { splitMessage, markdownToTelegramHtml } from "./telegram";
 import { transcribeAudio } from "./transcribe";
@@ -31,12 +31,17 @@ const bot = new Bot(BOT_TOKEN);
 interface MessageFlags {
   skipRetrieval: boolean;
   skipKBUpdate: boolean;
+  triggerSculptor: boolean;
 }
 
 function parseFlags(text: string): { cleaned: string; flags: MessageFlags } {
-  const flags: MessageFlags = { skipRetrieval: false, skipKBUpdate: false };
+  const flags: MessageFlags = { skipRetrieval: false, skipKBUpdate: false, triggerSculptor: false };
   let cleaned = text;
 
+  if (/(?:^|\s)#sculptor(?:\s|$)/i.test(cleaned)) {
+    flags.triggerSculptor = true;
+    cleaned = cleaned.replace(/(?:^|\s)#sculptor(?:\s|$)/i, " ");
+  }
   if (/(?:^|\s)#q(?:\s|$)/i.test(cleaned)) {
     flags.skipRetrieval = true;
     flags.skipKBUpdate = true;
@@ -235,6 +240,11 @@ bot.use((ctx, next) => {
 async function handleMessage(ctx: Context, text: string): Promise<void> {
   const { cleaned, flags } = parseFlags(text);
   text = cleaned;
+
+  if (flags.triggerSculptor) {
+    handleSculptorTrigger(ctx);
+    return;
+  }
 
   const isAutoForward = ctx.msg?.is_automatic_forward === true;
 
@@ -692,6 +702,127 @@ async function handleUpdaterReply(ctx: Context, text: string, threadId: number):
   } finally {
     updaterMutex.release();
   }
+}
+
+// --- Sculptor analysis with streaming (shared by #sculptor trigger and daily schedule) ---
+
+async function runSculptorStreaming(chatId: number, replyToMsgId?: number): Promise<void> {
+  await updaterMutex.acquire();
+
+  let placeholder: { message_id: number } | null = null;
+  const progressLines: string[] = ["🔍 Running KB Sculptor analysis…"];
+  let progressTimer: ReturnType<typeof setTimeout> | null = null;
+  let placeholderDead = false;
+
+  function flushProgress() {
+    progressTimer = null;
+    if (!placeholder || placeholderDead || progressLines.length === 0) return;
+    let body = progressLines.join("\n");
+    while (body.length > 3800 && progressLines.length > 1) {
+      progressLines.shift();
+      body = "⋯ (earlier steps trimmed)\n" + progressLines.join("\n");
+    }
+    bot.api
+      .editMessageText(chatId, placeholder.message_id, body)
+      .catch((err: Error) => {
+        const msg = err.message ?? "";
+        if (msg.includes("message is not modified") || msg.includes("message to edit not found")) {
+          if (msg.includes("not found")) placeholderDead = true;
+          return;
+        }
+      });
+  }
+
+  function onProgress(line: string) {
+    progressLines.push(line);
+    if (!progressTimer) {
+      progressTimer = setTimeout(flushProgress, 1500);
+    }
+  }
+
+  try {
+    placeholder = await bot.api.sendMessage(chatId, "🔍 Running KB Sculptor analysis…", {
+      ...(replyToMsgId ? { reply_parameters: { message_id: replyToMsgId } } : {}),
+    });
+
+    const result = await runSculptorAnalysis(onProgress);
+
+    if (progressTimer) clearTimeout(progressTimer);
+
+    const report = result.result || "(No analysis available)";
+    const sessionId = result.sessionId;
+
+    // Write pending.json so the approval flow works
+    await mkdir(SCULPTOR_DIR, { recursive: true });
+    const pendingData = {
+      session_id: sessionId,
+      timestamp: new Date().toISOString(),
+      status: "notified",
+      telegram_message_id: null as number | null,
+    };
+
+    // Send the report as a new message (reply-to-approve target)
+    const footer = '\nReply to apply changes. Example: "apply all", "apply everything except X", or "skip"';
+    let text = report + footer;
+    if (text.length > 4000) {
+      text = report.slice(0, 4000 - footer.length - 20) + "\n\n(truncated)" + footer;
+    }
+
+    const reportMsg = await bot.api.sendMessage(chatId, text);
+
+    // Register for reply routing
+    if (sculptorMessageIds.size > 100) {
+      sculptorMessageIds.delete(sculptorMessageIds.keys().next().value!);
+    }
+    sculptorMessageIds.set(reportMsg.message_id, { sessionId });
+
+    pendingData.telegram_message_id = reportMsg.message_id;
+    await writeFile(SCULPTOR_PENDING, JSON.stringify(pendingData, null, 2));
+
+    // Update placeholder with done status
+    if (placeholder && !placeholderDead) {
+      await bot.api
+        .editMessageText(chatId, placeholder.message_id, "✅ Sculptor analysis complete. See report below.")
+        .catch(() => {});
+    }
+
+    console.log(`[sculptor] Analysis complete, message_id=${reportMsg.message_id}`);
+  } catch (err) {
+    if (progressTimer) clearTimeout(progressTimer);
+    console.error("[sculptor] Analysis failed:", err);
+    const errMsg = err instanceof Error ? err.message : String(err);
+    if (placeholder && !placeholderDead) {
+      await bot.api
+        .editMessageText(chatId, placeholder.message_id, `🔍 Sculptor analysis failed: ${errMsg.slice(0, 200)}`)
+        .catch(() => {});
+    }
+  } finally {
+    updaterMutex.release();
+  }
+}
+
+// --- Sculptor trigger via #sculptor ---
+
+async function handleSculptorTrigger(ctx: Context): Promise<void> {
+  const msgId = ctx.msg!.message_id;
+  const chatId = ctx.chat!.id;
+
+  // Check if a sculptor analysis is already pending
+  try {
+    const raw = await readFile(SCULPTOR_PENDING, "utf-8");
+    const data = JSON.parse(raw);
+    if (data.status === "pending_review" || data.status === "notified") {
+      await ctx.reply("A sculptor analysis is already pending. Reply to it or send \"skip\" first.", {
+        reply_parameters: { message_id: msgId },
+      });
+      return;
+    }
+  } catch {
+    // No pending file — good, proceed
+  }
+
+  console.log("[sculptor] Manual trigger via #sculptor");
+  runSculptorStreaming(chatId, msgId);
 }
 
 // --- Sculptor notification poller ---

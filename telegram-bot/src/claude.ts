@@ -779,6 +779,34 @@ export async function replyToUpdater(
   return consumeAgentStream(response, onProgress);
 }
 
+// --- Sculptor analysis (triggered via #sculptor in Telegram) ---
+
+export async function runSculptorAnalysis(
+  onProgress?: (line: string) => void,
+): Promise<UpdaterResult> {
+  const prompt = await readFile(path.join(CWD, "sculptor-prompt.md"), "utf-8");
+
+  const response = query({
+    prompt,
+    options: {
+      model: "claude-opus-4-6",
+      cwd: CWD,
+      pathToClaudeCodeExecutable: "/home/imdavid/.local/bin/claude",
+      env: cleanEnv,
+      allowedTools: [
+        "Read", "Glob", "Grep", "Task",
+        "Bash(./kb-search *)", "Bash(./kb-recent *)",
+        "Bash(ls *)", "Bash(cat *)", "Bash(head *)", "Bash(tail *)",
+      ],
+      disallowedTools: ["Write", "Edit", "WebSearch", "WebFetch"],
+      maxTurns: 50,
+      settingSources: ["project", "local"],
+    },
+  });
+
+  return consumeAgentStream(response, onProgress);
+}
+
 // --- Sculptor execution (resumes analysis session to apply approved changes) ---
 
 export async function executeSculptor(
