@@ -10,7 +10,7 @@ Explore the full knowledge base in the current working directory and recommend i
 - **Cross-referencing** — related content across files/folders that should link to each other but doesn't.
 - **Consistency** — heading conventions, bullet style, file naming, formatting patterns, tone.
 
-Your output will be sent to David via Telegram. He'll reply with which changes to apply, and you'll then make those changes in a follow-up step. Keep your output concise — a brief overall assessment followed by a numbered list of concrete recommended actions (max 15). Be opinionated: recommend specific actions, not vague suggestions.
+Your output will be sent to David via Telegram. He'll reply with which changes to apply, and you'll then make those changes in a follow-up step. Keep your output concise — a brief overall assessment followed by a numbered list of concrete recommended actions (max 10). Be opinionated: recommend specific actions, not vague suggestions.
 
 You may use the Task tool to spawn sub-agents for deeper analysis of specific areas.
 
