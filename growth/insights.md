@@ -36,6 +36,7 @@ Learnings David has identified about how he works best. These are hypotheses and
 - Core goals: connection + building something meaningful. Financial stability supports these but obsessing over it undermines them.
 - Rest time = investing in personal life. Permission to fully disconnect from work during rest is both good for life AND good for work.
 - Won't stop being driven if he lets go of overdrive — he genuinely enjoys achieving things. Only the unhealthy part goes away.
+- **Holiday work anxiety (Feb 2026)**: While on Argentina trip, noticed low-key tension and nervousness when thinking about going back to work — fear of being unhappy, having conflicts again. Recognized this as the mountain-top worry pattern (see "Worry & anticipatory fear" below). Reflecting on work feelings is healthy; worrying about unknowns while on holiday is not.
 
 ## Guilt, shame & control
 - Carries guilt and shame as attempt to be a better person — but they actually fuel overdrive, social anxiety, and emotional (non-strategic) actions
@@ -59,11 +60,34 @@ Working on this with psychologist (Feb 2026). Named "Hank" for easy reference.
 - Slowing down or listening inwardly sometimes triggers anxiety/emptiness/self-doubt — trusting internal signals is a work in progress
 - Often operates from a mode that pushes to perform and follow rules, instead of listening to actual needs
 - **Patagonia discovery (Feb 2026)**: much of physical pain while hiking was actually mental — anticipatory worry about future injury, not current damage. Thought he could do ~15-20km but ended up doing 38-40km including trail running with significant elevation. The pain decreased when he committed to the route instead of worrying about it. Next day: sore but not injured at all. A big part of perceived limitation is Hank-generated worry, not real physical limit.
+- **Steep mountain descent (Feb 2026)**: hiking on a very steep mountain, wind and rain hit at the top. Mind panicked about going down — "are we going to survive, what did we get ourselves into." Actual descent turned out much easier: less wind, less rain, manageable steepness. Another confirmation that the mental panic creates a far worse picture than reality. Led to the broader "worry & anticipatory fear" insight (see below).
 - **Headache pattern**: woke up with headache → inner voice said "don't run, it'll make it worse" → realized those cautionary thoughts themselves create tension → when he just ran and let go of the worry, it felt freer
 
 ## The "50% > 0%" principle
 - Seed insight (Feb 2026): You don't have to be perfect to show up. Showing up at 50% beats staying home at 0%. Like being vegan but still eating bacon — imperfect action massively beats no action.
 - Applies to fitness, work, habits, everything. On a depleted day, "showed up and did stuff" is a win, not a failure.
+
+## Worry & anticipatory fear
+A recurring pattern David keeps rediscovering across different life domains. Many separate insights point to the same core truth — bundled here because they reinforce each other.
+
+**The core pattern**: Anticipatory worry about something is almost always worse than the thing itself. Sitting on top of the mountain fearing the descent is harder than actually going down. Applies to work, physical challenges, social situations — almost everything.
+
+**Why worry mostly doesn't serve you**:
+- ~90% of what you worry about never happens. And when it does, it's usually much more manageable than expected.
+- The things that truly impact you negatively tend to be unanticipated — black swans you never saw coming. Worry doesn't protect you from the real threats.
+- Worrying about a problem gives you two problems instead of one. Just deal with the problem. (A teacher of David's — "a bit of a stoner saying, but accurate")
+- You are almost always more capable of handling difficult situations than you think you are.
+
+**When worry IS useful**: When it alerts you to something genuinely actionable — a real danger you can prevent or prepare for. In that case, worry is a signal to act on, not to sit with.
+
+**The key distinction** (connects to Robert Greene): Worry/fear can *inform* you, but it shouldn't *make the decision* or take you over. See it, use it, act from groundedness — don't be lived by it.
+
+**Live examples**:
+- Steep mountain descent in Patagonia (Feb 2026): panicked at the top (hard wind, rain, very steep), but going down was surprisingly manageable — less wind, less rain, not as steep as feared. The fear at the top was far worse than the reality.
+- Previous Patagonia hike: thought he could do 15-20km, ended up doing 38-40km. Pain decreased when he committed instead of worrying. (See "Body & intuition" below)
+- Work anxiety while on holiday (Feb 2026): feeling tension about returning — afraid of unhappiness and conflicts. Recognized this as the same pattern: worrying from the mountain-top about a descent that may be fine. Not serving him to worry now when he has no idea what it'll actually be like.
+
+**Related sections**: Hank amplifies this (see above). Body & intuition shows the physical dimension. Work & achievement shows the career dimension.
 
 ## Environment & reflection
 - Being in a different environment (holiday, travel) helps condense recent experiences, reflect on life, gain clarity, reconnect with motivations — even when the trip isn't ideal
