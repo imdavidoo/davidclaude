@@ -32,12 +32,12 @@ export class ProgressTracker {
   static async create(
     api: Api,
     chatId: number,
-    replyToMessageId: number,
+    replyToMessageId: number | undefined,
     initialText: string,
     opts?: ProgressTrackerOptions,
   ): Promise<ProgressTracker> {
     const msg = await api.sendMessage(chatId, initialText, {
-      reply_parameters: { message_id: replyToMessageId },
+      ...(replyToMessageId ? { reply_parameters: { message_id: replyToMessageId } } : {}),
     });
     const tracker = new ProgressTracker(api, chatId, msg.message_id, opts);
     if (initialText) tracker.lines.push(initialText);
