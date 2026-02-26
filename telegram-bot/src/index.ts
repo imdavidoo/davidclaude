@@ -7,7 +7,7 @@ import { execSync } from "child_process";
 import { CWD } from "./config";
 import { ProgressTracker } from "./progress";
 import { Mutex, fireKBUpdate, handleUpdaterReply, isUpdaterMessage, getUpdaterThreadId } from "./updater";
-import { initSculptor, handleSculptorTrigger, handleSculptorReply, isSculptorMessage, getSculptorPending, restorePendingSculptor, scheduleDailySculptor } from "./sculptor";
+import { initSculptor, handleSculptorTrigger, handleSculptorReply, isSculptorMessage, getSculptorSession, scheduleDailySculptor } from "./sculptor";
 import { initMedia, handleMediaGroupPhoto, processImage, processAudio } from "./media";
 
 // --- Config ---
@@ -36,7 +36,6 @@ initMedia({
   getStopGeneration,
   handleMessage,
 });
-restorePendingSculptor();
 scheduleDailySculptor();
 
 // --- Message flags (#q, #ds, #du) ---
@@ -140,7 +139,7 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
     return;
   }
   if (replyToMsgId && isSculptorMessage(replyToMsgId)) {
-    handleSculptorReply(ctx, text, getSculptorPending(replyToMsgId));
+    handleSculptorReply(ctx, text, getSculptorSession(replyToMsgId).sessionId);
     return;
   }
 
