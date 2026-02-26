@@ -1,7 +1,7 @@
 import { Api, Context } from "grammy";
 import { runSculptorAnalysis, executeSculptor } from "./claude";
 import { withTrackedMutex } from "./updater";
-import { readFile, writeFile, mkdir, rm } from "fs/promises";
+import { readFile, writeFile, mkdir } from "fs/promises";
 import path from "path";
 import { CWD } from "./config";
 
@@ -19,6 +19,36 @@ export function isSculptorMessage(msgId: number): boolean {
 
 export function getSculptorPending(msgId: number): { sessionId: string } {
   return sculptorMessageIds.get(msgId)!;
+}
+
+// --- Pending file helpers (stores multiple entries keyed by message ID) ---
+
+interface PendingEntry {
+  session_id: string;
+  timestamp: string;
+}
+
+type PendingFile = Record<string, PendingEntry>;
+
+async function readPending(): Promise<PendingFile> {
+  try {
+    return JSON.parse(await readFile(SCULPTOR_PENDING, "utf-8"));
+  } catch {
+    return {};
+  }
+}
+
+async function savePendingEntry(messageId: number, sessionId: string): Promise<void> {
+  await mkdir(SCULPTOR_DIR, { recursive: true });
+  const pending = await readPending();
+  pending[messageId] = { session_id: sessionId, timestamp: new Date().toISOString() };
+  await writeFile(SCULPTOR_PENDING, JSON.stringify(pending, null, 2));
+}
+
+async function removePendingEntry(messageId: number): Promise<void> {
+  const pending = await readPending();
+  delete pending[messageId];
+  await writeFile(SCULPTOR_PENDING, JSON.stringify(pending, null, 2));
 }
 
 // --- Init: needs bot.api for sending messages ---
@@ -40,15 +70,6 @@ async function runSculptorStreaming(chatId: number, replyToMsgId?: number): Prom
       const report = result.response || "(No analysis available)";
       const sessionId = result.sessionId;
 
-      // Write pending.json so the approval flow works
-      await mkdir(SCULPTOR_DIR, { recursive: true });
-      const pendingData = {
-        session_id: sessionId,
-        timestamp: new Date().toISOString(),
-        status: "notified",
-        telegram_message_id: null as number | null,
-      };
-
       // Send the report as a new message (reply-to-approve target)
       const footer = '\nReply to apply changes. Example: "apply all", "apply everything except X", or "skip"';
       let text = report + footer;
@@ -64,8 +85,7 @@ async function runSculptorStreaming(chatId: number, replyToMsgId?: number): Prom
       }
       sculptorMessageIds.set(reportMsg.message_id, { sessionId });
 
-      pendingData.telegram_message_id = reportMsg.message_id;
-      await writeFile(SCULPTOR_PENDING, JSON.stringify(pendingData, null, 2));
+      await savePendingEntry(reportMsg.message_id, sessionId);
 
       await tracker.finish("✅ Sculptor analysis complete. See report below.");
       console.log(`[sculptor] Analysis complete, message_id=${reportMsg.message_id}`);
@@ -79,20 +99,6 @@ export async function handleSculptorTrigger(ctx: Context): Promise<void> {
   const msgId = ctx.msg!.message_id;
   const chatId = ctx.chat!.id;
 
-  // Check if a sculptor analysis is already pending
-  try {
-    const raw = await readFile(SCULPTOR_PENDING, "utf-8");
-    const data = JSON.parse(raw);
-    if (data.status === "pending_review" || data.status === "notified") {
-      await ctx.reply("A sculptor analysis is already pending. Reply to it or send \"skip\" first.", {
-        reply_parameters: { message_id: msgId },
-      });
-      return;
-    }
-  } catch {
-    // No pending file — good, proceed
-  }
-
   console.log("[sculptor] Manual trigger via #sculptor");
   runSculptorStreaming(chatId, msgId);
 }
@@ -101,13 +107,15 @@ export async function handleSculptorTrigger(ctx: Context): Promise<void> {
 
 export async function handleSculptorReply(ctx: Context, text: string, pending: { sessionId: string }): Promise<void> {
   const msgId = ctx.msg!.message_id;
+  const replyToId = ctx.msg!.reply_to_message!.message_id;
 
   // "skip" means dismiss
   if (text.trim().toLowerCase() === "skip") {
     await ctx.reply("Sculptor recommendations dismissed.", {
       reply_parameters: { message_id: msgId },
     });
-    await rm(SCULPTOR_PENDING).catch(() => {});
+    sculptorMessageIds.delete(replyToId);
+    await removePendingEntry(replyToId);
     return;
   }
 
@@ -118,23 +126,34 @@ export async function handleSculptorReply(ctx: Context, text: string, pending: {
     async (tracker) => {
       const result = await executeSculptor(text, pending.sessionId, (line) => tracker.push(line));
       await tracker.finish(`✅ Sculptor: ${result.response || "Done"}`);
-      await rm(SCULPTOR_PENDING).catch(() => {});
+      sculptorMessageIds.delete(replyToId);
+      await removePendingEntry(replyToId);
     },
   );
 }
 
 // --- Re-register pending messages on startup ---
 
+const MAX_PENDING_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
 export async function restorePendingSculptor(): Promise<void> {
-  try {
-    const raw = await readFile(SCULPTOR_PENDING, "utf-8");
-    const data = JSON.parse(raw);
-    if (data.status === "notified" && data.telegram_message_id) {
-      sculptorMessageIds.set(data.telegram_message_id, { sessionId: data.session_id });
-      console.log(`[sculptor] Re-registered notified message_id=${data.telegram_message_id}`);
+  const pending = await readPending();
+  const now = Date.now();
+  let pruned = false;
+
+  for (const [msgId, entry] of Object.entries(pending)) {
+    if (now - new Date(entry.timestamp).getTime() > MAX_PENDING_AGE_MS) {
+      delete pending[msgId];
+      pruned = true;
+      console.log(`[sculptor] Pruned stale entry message_id=${msgId}`);
+      continue;
     }
-  } catch {
-    // No pending file — nothing to re-register
+    sculptorMessageIds.set(Number(msgId), { sessionId: entry.session_id });
+    console.log(`[sculptor] Re-registered pending message_id=${msgId}`);
+  }
+
+  if (pruned) {
+    await writeFile(SCULPTOR_PENDING, JSON.stringify(pending, null, 2));
   }
 }
 
@@ -150,19 +169,6 @@ export function scheduleDailySculptor(): void {
   console.log(`[sculptor] Next daily run scheduled in ${Math.round(ms / 60_000)} minutes`);
 
   setTimeout(async () => {
-    // Check if already pending
-    try {
-      const raw = await readFile(SCULPTOR_PENDING, "utf-8");
-      const data = JSON.parse(raw);
-      if (data.status === "pending_review" || data.status === "notified") {
-        console.log("[sculptor] Skipping daily run — analysis already pending");
-        scheduleDailySculptor();
-        return;
-      }
-    } catch {
-      // No pending file — proceed
-    }
-
     console.log("[sculptor] Starting daily scheduled run");
     runSculptorStreaming(SCULPTOR_CHAT_ID);
     scheduleDailySculptor();
