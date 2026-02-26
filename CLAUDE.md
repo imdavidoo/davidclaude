@@ -13,6 +13,13 @@ Three agents run per message (all in `telegram-bot/src/claude.ts`):
 
 - Managed by pm2: `pm2 restart davidclaude-bot` to restart after code changes.
 
+## KB Sculptor
+
+Daily scheduled KB maintenance (cron 17:00 NL). Analyzes the full KB for deduplication, condensation, structural issues, etc. Sends recommendations to Direct channel; David replies to approve.
+
+- Manual trigger: `./sculptor.sh >> .sculptor/cron.log 2>&1 &`
+- Config: `sculptor-prompt.md`, bot integration in `index.ts`/`claude.ts`
+
 ## Key tools
 
 - `./kb-search "term1" "term2"` — hybrid vector + keyword search. Related terms in one search boost each other; separate topics need separate searches.
