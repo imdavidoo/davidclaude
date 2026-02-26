@@ -1,14 +1,14 @@
-import { Api, Bot, Context } from "grammy";
-import { sendMessage, retrieveContext, updateKnowledgeBase, replyToUpdater, executeSculptor, runSculptorAnalysis, clearSelectedChunksStore } from "./claude";
-import { getSession, setSessionId, setRetrievalSessionId, setFilterSessionId, setUpdaterSessionId, isSeen, markSeen } from "./sessions";
+import { Bot, Context } from "grammy";
+import { sendMessage, retrieveContext, clearSelectedChunksStore } from "./claude";
+import { getSession, setSessionId, setRetrievalSessionId, setFilterSessionId, isSeen, markSeen } from "./sessions";
 import { splitMessage, markdownToTelegramHtml } from "./telegram";
-import { transcribeAudio } from "./transcribe";
 import { getChannelConfig, getAllowedChatIds } from "./channels";
-import { readFile, writeFile, mkdir, rm } from "fs/promises";
-import path from "path";
 import { execSync } from "child_process";
-import { CWD, UPLOAD_DIR } from "./config";
+import { CWD } from "./config";
 import { ProgressTracker } from "./progress";
+import { Mutex, fireKBUpdate, handleUpdaterReply, isUpdaterMessage, getUpdaterThreadId } from "./updater";
+import { initSculptor, handleSculptorTrigger, handleSculptorReply, isSculptorMessage, getSculptorPending, restorePendingSculptor, scheduleDailySculptor } from "./sculptor";
+import { initMedia, handleMediaGroupPhoto, processImage, processAudio } from "./media";
 
 // --- Config ---
 
@@ -25,6 +25,19 @@ if (!BOT_TOKEN) {
 }
 
 const bot = new Bot(BOT_TOKEN);
+
+// --- Initialize modules that need bot dependencies ---
+
+initSculptor(bot.api);
+initMedia({
+  botApi: bot.api,
+  botToken: BOT_TOKEN,
+  getThreadId,
+  getStopGeneration,
+  handleMessage,
+});
+restorePendingSculptor();
+scheduleDailySculptor();
 
 // --- Message flags (#q, #ds, #du) ---
 
@@ -61,30 +74,7 @@ function parseFlags(text: string): { cleaned: string; flags: MessageFlags } {
 
 // --- Per-thread mutex ---
 
-class Mutex {
-  private queue: Array<() => void> = [];
-  private locked = false;
-
-  async acquire(): Promise<void> {
-    if (!this.locked) {
-      this.locked = true;
-      return;
-    }
-    return new Promise<void>((resolve) => this.queue.push(resolve));
-  }
-
-  release(): void {
-    const next = this.queue.shift();
-    if (next) {
-      next();
-    } else {
-      this.locked = false;
-    }
-  }
-}
-
 const mutexes = new Map<number, Mutex>();
-
 
 function getMutex(threadId: number): Mutex {
   let m = mutexes.get(threadId);
@@ -109,62 +99,8 @@ function getStopGeneration(threadId: number): number {
   return stopGenerations.get(threadId) ?? 0;
 }
 
-// --- Global KB updater (runs after main agent, one at a time) ---
-
-const updaterMutex = new Mutex();
-
-// Maps updater status message IDs -> thread IDs for reply routing
-const updaterMessageIds = new Map<number, number>();
-
-// --- KB Sculptor notification tracking ---
-
-const SCULPTOR_DIR = path.join(CWD, ".sculptor");
-const SCULPTOR_PENDING = path.join(SCULPTOR_DIR, "pending.json");
-const SCULPTOR_CHAT_ID = Number(process.env.SCULPTOR_CHAT_ID ?? -1003881403661);
-
-const sculptorMessageIds = new Map<number, { sessionId: string }>();
-
-// --- Shared lifecycle: acquire updater mutex → create tracker → run fn → handle errors → release ---
-
-async function withTrackedMutex(
-  opts: { api: Api; chatId: number; replyTo?: number; label: string; errorPrefix: string; tag: string },
-  fn: (tracker: ProgressTracker) => Promise<void>,
-): Promise<void> {
-  await updaterMutex.acquire();
-  const tracker = await ProgressTracker.create(opts.api, opts.chatId, opts.replyTo, opts.label);
-  try {
-    await fn(tracker);
-  } catch (err) {
-    console.error(`[${opts.tag}] Failed:`, err);
-    const errMsg = err instanceof Error ? err.message : String(err);
-    await tracker.finish(`${opts.errorPrefix}: ${errMsg.slice(0, 200)}`);
-  } finally {
-    tracker.destroy();
-    updaterMutex.release();
-  }
-}
-
-function fireKBUpdate(ctx: Context, text: string, threadId: number, sessionId?: string | null, mainAgentDiff?: string | null, lastAIResponse?: string | null): void {
-  console.log(`[updater:${threadId}] fireKBUpdate called`);
-  withTrackedMutex(
-    { api: ctx.api, chatId: ctx.chat!.id, replyTo: threadId, label: "📝 Updating knowledge base…", errorPrefix: "📝 KB update failed", tag: `updater:${threadId}` },
-    async (tracker) => {
-      const result = await updateKnowledgeBase(text, sessionId, (line) => tracker.push(line), mainAgentDiff, lastAIResponse);
-      console.log(`[updater:${threadId}] updateKnowledgeBase returned: result="${result.response?.slice(0, 100)}", sessionId=${result.sessionId?.slice(0, 8)}`);
-      if (result.sessionId) {
-        setUpdaterSessionId(threadId, result.sessionId);
-      }
-      if (!result.response || result.response === "NOTHING") {
-        await tracker.delete();
-      } else {
-        await tracker.finish(`✅ ${result.response}`);
-        if (updaterMessageIds.size > 500) {
-          updaterMessageIds.delete(updaterMessageIds.keys().next().value!);
-        }
-        updaterMessageIds.set(tracker.messageId, threadId);
-      }
-    },
-  );
+function getThreadId(ctx: Context): number | undefined {
+  return ctx.msg?.is_automatic_forward ? ctx.msg.message_id : ctx.msg?.message_thread_id;
 }
 
 // --- Security middleware ---
@@ -192,10 +128,6 @@ bot.use((ctx, next) => {
   markSeen(updateId);
   return next();
 });
-
-function getThreadId(ctx: Context): number | undefined {
-  return ctx.msg?.is_automatic_forward ? ctx.msg.message_id : ctx.msg?.message_thread_id;
-}
 
 // --- Shared message handler ---
 
@@ -358,350 +290,6 @@ async function handleMessage(ctx: Context, text: string): Promise<void> {
   }
 }
 
-// --- Download file from Telegram ---
-
-async function downloadTelegramFile(fileId: string): Promise<Buffer> {
-  const file = await bot.api.getFile(fileId);
-  const url = `https://api.telegram.org/file/bot${BOT_TOKEN}/${file.file_path}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Failed to download file: ${res.status}`);
-  return Buffer.from(await res.arrayBuffer());
-}
-
-// --- Media group batching ---
-
-interface MediaGroupEntry {
-  ctx: Context;
-  fileId: string;
-  mimeType: string;
-  caption?: string;
-}
-
-const mediaGroups = new Map<
-  string,
-  { entries: MediaGroupEntry[]; timer: ReturnType<typeof setTimeout> }
->();
-
-const MEDIA_GROUP_WAIT_MS = 500;
-
-function handleMediaGroupPhoto(
-  mediaGroupId: string,
-  ctx: Context,
-  fileId: string,
-  mimeType: string,
-  caption: string | undefined
-): void {
-  let group = mediaGroups.get(mediaGroupId);
-  if (!group) {
-    group = {
-      entries: [],
-      timer: setTimeout(() => flushMediaGroup(mediaGroupId), MEDIA_GROUP_WAIT_MS),
-    };
-    mediaGroups.set(mediaGroupId, group);
-  } else {
-    clearTimeout(group.timer);
-    group.timer = setTimeout(
-      () => flushMediaGroup(mediaGroupId),
-      MEDIA_GROUP_WAIT_MS
-    );
-  }
-  group.entries.push({ ctx, fileId, mimeType, caption });
-}
-
-async function flushMediaGroup(mediaGroupId: string): Promise<void> {
-  const group = mediaGroups.get(mediaGroupId);
-  mediaGroups.delete(mediaGroupId);
-  if (!group || group.entries.length === 0) return;
-
-  const firstEntry = group.entries[0];
-  const caption = group.entries.find((e) => e.caption)?.caption;
-  const images = group.entries.map((e) => ({
-    fileId: e.fileId,
-    mimeType: e.mimeType,
-  }));
-
-  return processImages(firstEntry.ctx, images, caption);
-}
-
-// --- Save image to disk for Claude to read directly ---
-
-async function saveImage(fileId: string, ext: string): Promise<string> {
-  await mkdir(UPLOAD_DIR, { recursive: true });
-  const path = `${UPLOAD_DIR}/${Date.now()}-${fileId.slice(-8)}.${ext}`;
-  const buffer = await downloadTelegramFile(fileId);
-  await writeFile(path, buffer);
-  return path;
-}
-
-async function processImage(
-  ctx: Context,
-  fileId: string,
-  mimeType: string,
-  caption: string | undefined
-): Promise<void> {
-  return processImages(ctx, [{ fileId, mimeType }], caption);
-}
-
-async function processImages(
-  ctx: Context,
-  images: Array<{ fileId: string; mimeType: string }>,
-  caption: string | undefined
-): Promise<void> {
-  const threadId = getThreadId(ctx);
-
-  if (!threadId) return;
-
-  let savedPaths: string[] = [];
-  const generation = getStopGeneration(threadId);
-
-  try {
-    // Save all images to disk in parallel
-    const tImg = Date.now();
-    savedPaths = await Promise.all(
-      images.map(img => {
-        const ext = img.mimeType.split("/")[1] ?? "jpg";
-        return saveImage(img.fileId, ext);
-      })
-    );
-    console.log(`[thread:${threadId}] Image download: ${Date.now() - tImg}ms (${images.length} file${images.length > 1 ? "s" : ""})`);
-
-    if (getStopGeneration(threadId) !== generation) return;
-
-    const pathList = savedPaths.map((p) => `- ${p}`).join("\n");
-    const count = savedPaths.length;
-    const noun = count === 1 ? "an image" : `${count} images`;
-
-    const prompt = caption
-      ? `[User sent ${noun} with caption: "${caption}"]\n\nImage files (use Read tool to view):\n${pathList}`
-      : `[User sent ${noun}]\n\nImage files (use Read tool to view):\n${pathList}`;
-
-    await handleMessage(ctx, prompt);
-  } catch (err) {
-    const errMsg = err instanceof Error ? err.message : String(err);
-    await ctx.reply(`Error processing image: ${errMsg.slice(0, 1000)}`, {
-      reply_parameters: { message_id: threadId },
-    });
-    console.error(`[thread:${threadId}] Image error:`, err);
-  } finally {
-    // Clean up saved files
-    for (const p of savedPaths) {
-      rm(p).catch(() => {});
-    }
-  }
-}
-
-// --- Process audio and build prompt for Claude ---
-
-async function processAudio(
-  ctx: Context,
-  fileId: string,
-  filename: string
-): Promise<void> {
-  const threadId = getThreadId(ctx);
-
-  if (!threadId) return;
-
-  const replyOpts = { reply_parameters: { message_id: threadId } };
-  const statusMsg = await ctx.reply("transcribing...", replyOpts);
-
-  const generation = getStopGeneration(threadId);
-
-  try {
-    const tAudio = Date.now();
-    const buffer = await downloadTelegramFile(fileId);
-    console.log(`[thread:${threadId}] Audio download: ${Date.now() - tAudio}ms (${(buffer.length / 1024).toFixed(0)}KB)`);
-    const tTranscribe = Date.now();
-    const transcription = await transcribeAudio(buffer, filename);
-    console.log(`[thread:${threadId}] Transcription: ${Date.now() - tTranscribe}ms (${transcription.length} chars)`);
-
-    await ctx.api.deleteMessage(ctx.chat!.id, statusMsg.message_id).catch(() => {});
-
-    if (getStopGeneration(threadId) !== generation) return;
-
-    const prompt = `[User sent a voice/audio message]\n\nTranscription:\n${transcription}`;
-
-    await handleMessage(ctx, prompt);
-  } catch (err) {
-    const errMsg = err instanceof Error ? err.message : String(err);
-    await ctx.reply(`Error processing audio: ${errMsg.slice(0, 1000)}`, {
-      reply_parameters: { message_id: threadId },
-    });
-    console.error(`[thread:${threadId}] Audio error:`, err);
-  }
-}
-
-// --- Updater reply handler ---
-
-async function handleUpdaterReply(ctx: Context, text: string, threadId: number): Promise<void> {
-  const session = getSession(threadId);
-  const updaterSessionId = session?.updater_session_id;
-
-  if (!updaterSessionId) {
-    return handleMessage(ctx, text);
-  }
-
-  await withTrackedMutex(
-    { api: ctx.api, chatId: ctx.chat!.id, replyTo: threadId, label: "📝 Updating knowledge base…", errorPrefix: "📝 KB update failed", tag: `updater-reply:${threadId}` },
-    async (tracker) => {
-      const result = await replyToUpdater(text, updaterSessionId, (line) => tracker.push(line));
-      if (result.sessionId) {
-        setUpdaterSessionId(threadId, result.sessionId);
-      }
-      if (!result.response || result.response === "NOTHING") {
-        await tracker.delete();
-      } else {
-        await tracker.finish(`✅ ${result.response}`);
-        if (updaterMessageIds.size > 500) {
-          updaterMessageIds.delete(updaterMessageIds.keys().next().value!);
-        }
-        updaterMessageIds.set(tracker.messageId, threadId);
-      }
-    },
-  );
-}
-
-// --- Sculptor analysis with streaming (shared by #sculptor trigger and daily schedule) ---
-
-async function runSculptorStreaming(chatId: number, replyToMsgId?: number): Promise<void> {
-  await withTrackedMutex(
-    { api: bot.api, chatId, replyTo: replyToMsgId, label: "🔍 Running KB Sculptor analysis…", errorPrefix: "🔍 Sculptor analysis failed", tag: "sculptor" },
-    async (tracker) => {
-      const result = await runSculptorAnalysis((line) => tracker.push(line));
-
-      const report = result.response || "(No analysis available)";
-      const sessionId = result.sessionId;
-
-      // Write pending.json so the approval flow works
-      await mkdir(SCULPTOR_DIR, { recursive: true });
-      const pendingData = {
-        session_id: sessionId,
-        timestamp: new Date().toISOString(),
-        status: "notified",
-        telegram_message_id: null as number | null,
-      };
-
-      // Send the report as a new message (reply-to-approve target)
-      const footer = '\nReply to apply changes. Example: "apply all", "apply everything except X", or "skip"';
-      let text = report + footer;
-      if (text.length > 4000) {
-        text = report.slice(0, 4000 - footer.length - 20) + "\n\n(truncated)" + footer;
-      }
-
-      const reportMsg = await bot.api.sendMessage(chatId, text);
-
-      // Register for reply routing
-      if (sculptorMessageIds.size > 100) {
-        sculptorMessageIds.delete(sculptorMessageIds.keys().next().value!);
-      }
-      sculptorMessageIds.set(reportMsg.message_id, { sessionId });
-
-      pendingData.telegram_message_id = reportMsg.message_id;
-      await writeFile(SCULPTOR_PENDING, JSON.stringify(pendingData, null, 2));
-
-      await tracker.finish("✅ Sculptor analysis complete. See report below.");
-      console.log(`[sculptor] Analysis complete, message_id=${reportMsg.message_id}`);
-    },
-  );
-}
-
-// --- Sculptor trigger via #sculptor ---
-
-async function handleSculptorTrigger(ctx: Context): Promise<void> {
-  const msgId = ctx.msg!.message_id;
-  const chatId = ctx.chat!.id;
-
-  // Check if a sculptor analysis is already pending
-  try {
-    const raw = await readFile(SCULPTOR_PENDING, "utf-8");
-    const data = JSON.parse(raw);
-    if (data.status === "pending_review" || data.status === "notified") {
-      await ctx.reply("A sculptor analysis is already pending. Reply to it or send \"skip\" first.", {
-        reply_parameters: { message_id: msgId },
-      });
-      return;
-    }
-  } catch {
-    // No pending file — good, proceed
-  }
-
-  console.log("[sculptor] Manual trigger via #sculptor");
-  runSculptorStreaming(chatId, msgId);
-}
-
-// --- Sculptor: re-register pending messages on startup ---
-
-(async () => {
-  try {
-    const raw = await readFile(SCULPTOR_PENDING, "utf-8");
-    const data = JSON.parse(raw);
-    if (data.status === "notified" && data.telegram_message_id) {
-      sculptorMessageIds.set(data.telegram_message_id, { sessionId: data.session_id });
-      console.log(`[sculptor] Re-registered notified message_id=${data.telegram_message_id}`);
-    }
-  } catch {
-    // No pending file — nothing to re-register
-  }
-})();
-
-// --- Sculptor: daily scheduled run at 17:00 local time ---
-
-function scheduleDailySculptor(): void {
-  const now = new Date();
-  const target = new Date(now);
-  target.setHours(17, 0, 0, 0);
-  if (target <= now) target.setDate(target.getDate() + 1);
-
-  const ms = target.getTime() - now.getTime();
-  console.log(`[sculptor] Next daily run scheduled in ${Math.round(ms / 60_000)} minutes`);
-
-  setTimeout(async () => {
-    // Check if already pending
-    try {
-      const raw = await readFile(SCULPTOR_PENDING, "utf-8");
-      const data = JSON.parse(raw);
-      if (data.status === "pending_review" || data.status === "notified") {
-        console.log("[sculptor] Skipping daily run — analysis already pending");
-        scheduleDailySculptor();
-        return;
-      }
-    } catch {
-      // No pending file — proceed
-    }
-
-    console.log("[sculptor] Starting daily scheduled run");
-    runSculptorStreaming(SCULPTOR_CHAT_ID);
-    scheduleDailySculptor();
-  }, ms);
-}
-
-scheduleDailySculptor();
-
-// --- Sculptor reply handler ---
-
-async function handleSculptorReply(ctx: Context, text: string, pending: { sessionId: string }): Promise<void> {
-  const msgId = ctx.msg!.message_id;
-
-  // "skip" means dismiss
-  if (text.trim().toLowerCase() === "skip") {
-    await ctx.reply("Sculptor recommendations dismissed.", {
-      reply_parameters: { message_id: msgId },
-    });
-    await rm(SCULPTOR_PENDING).catch(() => {});
-    return;
-  }
-
-  console.log(`[sculptor] User replied: "${text.slice(0, 100)}", resuming session ${pending.sessionId.slice(0, 8)}`);
-
-  await withTrackedMutex(
-    { api: ctx.api, chatId: ctx.chat!.id, replyTo: msgId, label: "🔧 Applying sculptor changes…", errorPrefix: "🔧 Sculptor failed", tag: "sculptor-apply" },
-    async (tracker) => {
-      const result = await executeSculptor(text, pending.sessionId, (line) => tracker.push(line));
-      await tracker.finish(`✅ Sculptor: ${result.response || "Done"}`);
-      await rm(SCULPTOR_PENDING).catch(() => {});
-    },
-  );
-}
-
 // --- Message handlers ---
 
 bot.on("message:text", (ctx) => {
@@ -729,13 +317,13 @@ bot.on("message:text", (ctx) => {
 
   // --- Normal message routing (fire-and-forget so Grammy can process "stop" immediately) ---
   const replyToMsgId = ctx.msg.reply_to_message?.message_id;
-  if (replyToMsgId && updaterMessageIds.has(replyToMsgId)) {
-    const threadId = updaterMessageIds.get(replyToMsgId)!;
-    handleUpdaterReply(ctx, ctx.msg.text, threadId);
+  if (replyToMsgId && isUpdaterMessage(replyToMsgId)) {
+    const threadId = getUpdaterThreadId(replyToMsgId);
+    handleUpdaterReply(ctx, ctx.msg.text, threadId, handleMessage);
     return;
   }
-  if (replyToMsgId && sculptorMessageIds.has(replyToMsgId)) {
-    handleSculptorReply(ctx, ctx.msg.text, sculptorMessageIds.get(replyToMsgId)!);
+  if (replyToMsgId && isSculptorMessage(replyToMsgId)) {
+    handleSculptorReply(ctx, ctx.msg.text, getSculptorPending(replyToMsgId));
     return;
   }
   handleMessage(ctx, ctx.msg.text);

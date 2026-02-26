@@ -5,30 +5,30 @@ import { promisify } from "util";
 
 const execAsync = promisify(exec);
 import path from "path";
-import { CWD, CLAUDE_PATH, cleanEnv } from "./config";
+import { CWD, CLAUDE_PATH, MODELS, cleanEnv } from "./config";
+
+// --- Tool allowlists (composed from shared groups) ---
+
+const BASE_READ_TOOLS = [
+  "Read", "Glob", "Grep",
+  "Bash(ls *)", "Bash(cat *)", "Bash(head *)", "Bash(tail *)", "Bash(wc *)", "Bash(find *)",
+];
+
+const KB_TOOLS = [
+  "Bash(./kb-search *)", "Bash(./kb-index)", "Bash(./kb-recent *)", "Bash(./notify *)",
+];
+
+const FILE_WRITE_TOOLS = [
+  "Write", "Edit", "Bash(mkdir *)", "Bash(mv *)",
+];
+
+const GIT_WRITE_TOOLS = [
+  "Bash(git add *)", "Bash(git commit *)", "Bash(git status)", "Bash(git diff *)",
+];
 
 const ALLOWED_TOOLS = [
-  "Read",
-  "Write",
-  "Edit",
-  "Glob",
-  "Grep",
-  "Task",
-  "WebSearch",
-  "WebFetch",
-  "Bash(./kb-search *)",
-  "Bash(./kb-index)",
-  "Bash(./kb-recent *)",
-  "Bash(./notify *)",
-  "Bash(git *)",
-  "Bash(mkdir *)",
-  "Bash(mv *)",
-  "Bash(ls *)",
-  "Bash(cat *)",
-  "Bash(head *)",
-  "Bash(tail *)",
-  "Bash(wc *)",
-  "Bash(find *)",
+  ...BASE_READ_TOOLS, ...FILE_WRITE_TOOLS, ...KB_TOOLS,
+  "Bash(git *)", "Task", "WebSearch", "WebFetch",
 ];
 
 export interface PermissionDenial {
@@ -170,6 +170,40 @@ async function consumeAgentStream(
   if (abortController?.signal.aborted) throw new Error("Cancelled");
 
   return { response: result.trim(), sessionId: finalSessionId, permissionDenials };
+}
+
+// Shared helper: invoke a Claude agent with common base options
+type SettingSource = "user" | "project" | "local";
+
+interface AgentOptions {
+  prompt: string;
+  model?: string;
+  systemPrompt?: string | { type: "preset"; preset: "claude_code"; append?: string };
+  allowedTools?: string[];
+  disallowedTools?: string[];
+  maxTurns?: number;
+  resume?: string;
+  settingSources?: SettingSource[];
+  abortController?: AbortController;
+  onQueryCreated?: (q: { close(): void }) => void;
+  onProgress?: (line: string) => void;
+}
+
+async function invokeAgent(opts: AgentOptions): Promise<ClaudeResult> {
+  const { prompt, onProgress, abortController, onQueryCreated, resume, ...agentOpts } = opts;
+  const response = query({
+    prompt,
+    options: {
+      ...agentOpts,
+      cwd: CWD,
+      pathToClaudeCodeExecutable: CLAUDE_PATH,
+      env: cleanEnv,
+      ...(resume ? { resume } : {}),
+      ...(abortController ? { abortController } : {}),
+    },
+  });
+  onQueryCreated?.(response);
+  return consumeAgentStream(response, { onProgress, abortController });
 }
 
 function topicPrefix(tag: string, text: string): string {
@@ -426,24 +460,16 @@ async function queryNoTools(
   abortController?: AbortController,
   onQueryCreated?: (q: { close(): void }) => void,
 ): Promise<{ result: string; sessionId: string }> {
-  const response = query({
+  const { response: result, sessionId: finalSessionId } = await invokeAgent({
     prompt,
-    options: {
-      model: "claude-haiku-4-5",
-      cwd: CWD,
-      pathToClaudeCodeExecutable: CLAUDE_PATH,
-      env: cleanEnv,
-      systemPrompt,
-      allowedTools: [],
-      maxTurns: 1,
-      ...(sessionId ? { resume: sessionId } : {}),
-      ...(abortController ? { abortController } : {}),
-    },
+    model: MODELS.retrieval,
+    systemPrompt,
+    allowedTools: [],
+    maxTurns: 1,
+    resume: sessionId ?? undefined,
+    abortController,
+    onQueryCreated,
   });
-
-  onQueryCreated?.(response);
-
-  const { response: result, sessionId: finalSessionId } = await consumeAgentStream(response, { abortController });
   return { result, sessionId: finalSessionId };
 }
 
@@ -648,27 +674,7 @@ export async function retrieveContext(
 // --- KB Updater agent ---
 
 const UPDATER_TOOLS = [
-  "Read",
-  "Write",
-  "Edit",
-  "Glob",
-  "Grep",
-  "Bash(./kb-search *)",
-  "Bash(./kb-index)",
-  "Bash(./kb-recent *)",
-  "Bash(./notify *)",
-  "Bash(mkdir *)",
-  "Bash(mv *)",
-  "Bash(ls *)",
-  "Bash(git add *)",
-  "Bash(git commit *)",
-  "Bash(git status)",
-  "Bash(git diff *)",
-  "Bash(cat *)",
-  "Bash(head *)",
-  "Bash(tail *)",
-  "Bash(wc *)",
-  "Bash(find *)",
+  ...BASE_READ_TOOLS, ...FILE_WRITE_TOOLS, ...KB_TOOLS, ...GIT_WRITE_TOOLS,
 ];
 
 function buildUpdaterPrompt(): string {
@@ -730,25 +736,17 @@ export async function replyToUpdater(
   sessionId: string,
   onProgress?: (line: string) => void,
 ): Promise<ClaudeResult> {
-  const prompt = `David replies to your last KB update: "${text}"\n\nFollow his instruction.`;
-
-  const response = query({
-    prompt,
-    options: {
-      model: "claude-opus-4-6",
-      cwd: CWD,
-      pathToClaudeCodeExecutable: CLAUDE_PATH,
-      env: cleanEnv,
-      systemPrompt: buildUpdaterPrompt(),
-      allowedTools: UPDATER_TOOLS,
-      disallowedTools: ["Task", "WebSearch", "WebFetch"],
-      maxTurns: 30,
-      settingSources: ["project", "local"],
-      resume: sessionId,
-    },
+  return invokeAgent({
+    prompt: `David replies to your last KB update: "${text}"\n\nFollow his instruction.`,
+    model: MODELS.updater,
+    systemPrompt: buildUpdaterPrompt(),
+    allowedTools: UPDATER_TOOLS,
+    disallowedTools: ["Task", "WebSearch", "WebFetch"],
+    maxTurns: 30,
+    settingSources: ["project", "local"],
+    resume: sessionId,
+    onProgress,
   });
-
-  return consumeAgentStream(response, { onProgress });
 }
 
 // --- Sculptor analysis (triggered via #sculptor in Telegram) ---
@@ -756,27 +754,19 @@ export async function replyToUpdater(
 export async function runSculptorAnalysis(
   onProgress?: (line: string) => void,
 ): Promise<ClaudeResult> {
-  const prompt = await readFile(path.join(CWD, "sculptor-prompt.md"), "utf-8");
-
-  const response = query({
-    prompt,
-    options: {
-      model: "claude-opus-4-6",
-      cwd: CWD,
-      pathToClaudeCodeExecutable: CLAUDE_PATH,
-      env: cleanEnv,
-      allowedTools: [
-        "Read", "Glob", "Grep", "Task",
-        "Bash(./kb-search *)", "Bash(./kb-recent *)",
-        "Bash(ls *)", "Bash(cat *)", "Bash(head *)", "Bash(tail *)",
-      ],
-      disallowedTools: ["Write", "Edit", "WebSearch", "WebFetch"],
-      maxTurns: 50,
-      settingSources: ["project", "local"],
-    },
+  return invokeAgent({
+    prompt: await readFile(path.join(CWD, "sculptor-prompt.md"), "utf-8"),
+    model: MODELS.sculptor,
+    allowedTools: [
+      "Read", "Glob", "Grep", "Task",
+      "Bash(./kb-search *)", "Bash(./kb-recent *)",
+      "Bash(ls *)", "Bash(cat *)", "Bash(head *)", "Bash(tail *)",
+    ],
+    disallowedTools: ["Write", "Edit", "WebSearch", "WebFetch"],
+    maxTurns: 50,
+    settingSources: ["project", "local"],
+    onProgress,
   });
-
-  return consumeAgentStream(response, { onProgress });
 }
 
 // --- Sculptor execution (resumes analysis session to apply approved changes) ---
@@ -786,34 +776,22 @@ export async function executeSculptor(
   sessionId: string,
   onProgress?: (line: string) => void,
 ): Promise<ClaudeResult> {
-  const prompt = `David reviewed your recommendations and replied:
+  return invokeAgent({
+    prompt: `David reviewed your recommendations and replied:
 
 "${userApproval}"
 
 Apply the changes David approved. Read each file immediately before editing (your earlier reads may be stale).
 
-After all changes: run ./kb-index once, then git add and commit with message "KB Sculptor: <short summary>".`;
-
-  const response = query({
-    prompt,
-    options: {
-      model: "claude-opus-4-6",
-      cwd: CWD,
-      pathToClaudeCodeExecutable: CLAUDE_PATH,
-      env: cleanEnv,
-      allowedTools: [
-        ...UPDATER_TOOLS,
-        "Bash(rm *)",
-        "Bash(git rm *)",
-      ],
-      disallowedTools: ["Task", "WebSearch", "WebFetch"],
-      maxTurns: 50,
-      settingSources: ["project", "local"],
-      resume: sessionId,
-    },
+After all changes: run ./kb-index once, then git add and commit with message "KB Sculptor: <short summary>".`,
+    model: MODELS.sculptor,
+    allowedTools: [...UPDATER_TOOLS, "Bash(rm *)", "Bash(git rm *)"],
+    disallowedTools: ["Task", "WebSearch", "WebFetch"],
+    maxTurns: 50,
+    settingSources: ["project", "local"],
+    resume: sessionId,
+    onProgress,
   });
-
-  return consumeAgentStream(response, { onProgress });
 }
 
 export async function updateKnowledgeBase(
@@ -835,23 +813,17 @@ export async function updateKnowledgeBase(
     ? `${aiContext}[David's message]\n"${text}"${diffContext}\n\nExtract any key new information. You already know what was previously processed.`
     : `${topicPrefix("KB Updater", text)} ${aiContext}[David's message]\n"${text}"${diffContext}\n\nExtract any key information worth persisting to the knowledge base.`;
 
-  const response = query({
+  return invokeAgent({
     prompt,
-    options: {
-      model: "claude-opus-4-6",
-      cwd: CWD,
-      pathToClaudeCodeExecutable: CLAUDE_PATH,
-      env: cleanEnv,
-      systemPrompt: buildUpdaterPrompt(),
-      allowedTools: UPDATER_TOOLS,
-      disallowedTools: ["Task", "WebSearch", "WebFetch"],
-      maxTurns: 30,
-      settingSources: ["project", "local"],
-      ...(sessionId ? { resume: sessionId } : {}),
-    },
+    model: MODELS.updater,
+    systemPrompt: buildUpdaterPrompt(),
+    allowedTools: UPDATER_TOOLS,
+    disallowedTools: ["Task", "WebSearch", "WebFetch"],
+    maxTurns: 30,
+    settingSources: ["project", "local"],
+    resume: sessionId ?? undefined,
+    onProgress,
   });
-
-  return consumeAgentStream(response, { onProgress });
 }
 
 // --- Main agent ---
@@ -865,17 +837,12 @@ export async function sendMessage(
   onQueryCreated?: (q: { close(): void }) => void,
   disallowedTools?: string[],
 ): Promise<ClaudeResult> {
-  const prompt = sessionId ? text : `${topicPrefix("Direct", text)} ${text}`;
-  const response = query({
-    prompt,
-    options: {
-      cwd: CWD,
-      pathToClaudeCodeExecutable: CLAUDE_PATH,
-      env: cleanEnv,
-      systemPrompt: {
-        type: "preset",
-        preset: "claude_code",
-        append: `${channelPrompt ? channelPrompt + "\n\n" : ""}You are running inside a Telegram bot. Do NOT use AskUserQuestion — it is unavailable. If you need clarification, make your best judgment and proceed.
+  return invokeAgent({
+    prompt: sessionId ? text : `${topicPrefix("Direct", text)} ${text}`,
+    systemPrompt: {
+      type: "preset",
+      preset: "claude_code",
+      append: `${channelPrompt ? channelPrompt + "\n\n" : ""}You are running inside a Telegram bot. Do NOT use AskUserQuestion — it is unavailable. If you need clarification, make your best judgment and proceed.
 
 Formatting rules (Telegram has limited formatting support):
 - Bold (**text**), italic (*text*), strikethrough (~~text~~), inline code (\`code\`), code blocks (\`\`\`), blockquotes (>), and [links](url) all work.
@@ -887,17 +854,14 @@ Formatting rules (Telegram has limited formatting support):
 Context retrieval:
 - Relevant KB context has already been retrieved and included in the message under [Retrieved KB context]. Use this context to ground your response.
 - Do NOT search the KB again unless you specifically need something that wasn't covered by the pre-loaded context.`,
-      },
-      settingSources: ["project", "local"],
-      allowedTools: ALLOWED_TOOLS,
-      ...(disallowedTools?.length ? { disallowedTools } : {}),
-      maxTurns: 50,
-      ...(sessionId ? { resume: sessionId } : {}),
-      ...(abortController ? { abortController } : {}),
     },
+    settingSources: ["project", "local"],
+    allowedTools: ALLOWED_TOOLS,
+    ...(disallowedTools?.length ? { disallowedTools } : {}),
+    maxTurns: 50,
+    resume: sessionId ?? undefined,
+    abortController,
+    onQueryCreated,
+    onProgress,
   });
-
-  onQueryCreated?.(response);
-
-  return consumeAgentStream(response, { onProgress, abortController });
 }
