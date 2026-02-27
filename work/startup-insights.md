@@ -24,6 +24,7 @@ Reflections and principles about building startups, accumulated from experience 
 - **Appeal of solo**: Full autonomy, no need to agree with a peer, can set a higher performance bar, hire a team that reports to you rather than navigating an equal partnership.
 - **Risk of solo**: Loneliness, pushing people away, and the "emperor problem" — removing all friction and surrounding yourself with yes-men always ends badly. A co-founder who blocks you and creates friction might be genuinely beneficial *because* of the discomfort.
 - **David's current lean**: Interested in trying solo after a potential PetRadar exit, but genuinely unsure. Recognizes both the appeal and the danger.
+- **Feb 2026 resolution**: Decided that while solo founding is genuinely appealing for the future, right now it would partly be running from interpersonal friction rather than toward something. Choosing to stay with the current situation and work through the people challenges first — then try solo from a place of growth, not avoidance.
 
 ## Anti-patterns from PetRadar
 
