@@ -69,5 +69,7 @@
 - [Packing list](argentina-2026-packing.md)
 - [Hiking safety guide](argentina-2026-hiking-safety.md)
 
-## Planning & Research
-*(To be filled — restaurants, activities, safety tips, etc.)*
+## Downtime Activities & To-Dos
+- [ ] Go through Apple Reminders — clean up life goals/activities lists, migrate relevant items into David OS
+- [ ] Brainstorm business ideas — see `work/business-ideas.md`
+- See `entertainment/watchlist.md` for trip watchlist

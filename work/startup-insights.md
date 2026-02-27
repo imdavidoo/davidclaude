@@ -1,6 +1,6 @@
 # Startup Insights
 
-Reflections and principles about building startups, accumulated from experience and thinking.
+Reflections and principles about building startups, accumulated from experience and thinking. See `work/business-ideas.md` for specific ideas evaluated against these criteria.
 
 ## What to look for in a new startup
 

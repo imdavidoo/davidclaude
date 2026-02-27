@@ -1,5 +1,7 @@
 # Business Ideas
 
+Concrete business ideas David has explored. See `work/startup-insights.md` for the underlying principles and evaluation criteria.
+
 ## AI Product/Purchase Advisor
 An AI assistant that learns your preferences through conversation and recommends products tailored to you — like a human personal shopper, but AI-powered.
 - **How it works**: Chat-based interface that gets to know the user over time. When they want to buy something (e.g. clothes on Zalando), the AI browses and finds the best match at the best price.

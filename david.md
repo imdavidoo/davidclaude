@@ -33,71 +33,28 @@ Childhood left him feeling out of control and in pain → developed a coping mec
 
 ## Values & life philosophy
 - **Core goals**: be connected and build something meaningful
-- **Financial stability** matters because it protects those goals, but extreme obsession with achieving it is counterproductive for happiness, connection, and meaningful work
 - **Wants to live from**: joy, pleasure, feeling alive and connected — not just pushing, performing, being responsible
-- **Inner voice goal**: speak to himself like someone on his own team. Two check questions: "Does this sound like I'm on my own team?" and "Would I speak this way to someone I love?"
-- **Already doing enough** — working hard, trying, caring. Doesn't need to be perfect or control every outcome. If he lets go of the pressure-driven 40% and focuses on what he genuinely cares about, he'll still accomplish most of what matters while feeling lighter.
 - **Life feels short** — wants to choose activities that make life feel real, meaningful, and lived rather than losing time to numbing distraction
 - **The real world nourishes more than screens** — nature and physical engagement make him feel more alive
-
-## Work philosophy
-Works best from strategy, not fear. Rest = investing in personal life, not just recovering. See `growth/insights.md` for details.
-
-## Energy & rest
-- Needs balanced mix of rest, gentle activity, and stimulation — unstructured downtime is destabilizing
-- Screen time half-rule and energy management principles in `growth/techniques.md` and `growth/insights.md`
-- **Crash pattern**: sleep-deprived + emotionally overloaded + depleted → system breaks down. Recovery: sleep, lower expectations, show up at 50%.
-
-## Empathy & connection
-- Social contact is deeply nourishing even when it triggers anxiety — worth actively seeking
-- Best gift to parents: spending time and connecting with them
-- See `growth/insights.md` for empathy and social connection principles
-
-## Body signals
-Trusting body signals and intuition is a work in progress — see `growth/insights.md` for details.
-
-## Emotional regulation
-- Uses the emotional pause for strong emotions — see `growth/techniques.md`
-- Cultivating stable inner self-worth → less insecurity, less validation-seeking, more attention on what truly matters (Robert Greene — Laws of Human Nature)
+- See `growth/insights.md` for detailed principles on work, guilt/shame, energy, and self-compassion
+- See `growth/techniques.md` for named practices (inner voice check, emotional pause, screen time rule, etc.)
 
 ## Health, fitness & longevity
-- **Growing interest in health, longevity, nutrition, and sleep** — becoming a real focus area
+- Growing interest in health, longevity, nutrition, and sleep — becoming a real focus area
 - Inspired by Philip (health/nutrition/sleep), Ira (fitness/running discipline), and own desire to become a truly healthy, fit person
-- Feels like he's genuinely getting there — this is a positive momentum area
-- Active daily: midday cardio (running, cycling, swimming) + calisthenics micro-habits throughout the day
-- Integrates exercise into work flow — short sets during work, meals, breaks
-- Has gymnastics rings at home
-- Practicing pistol squats (working on ankle flexion)
-- Enjoys bodyweight/calisthenics over gym equipment
-- Hobby: salsa dancing
-- **Adaptive zone**: consistent 40-100% beats pushing 130%. Hard pushing → extended recovery. Consistent showing up → better results. Applies to work and life too.
-
-## To do when back in Netherlands
-- Get a hearing test
-- Try the Goggins max-distance run experiment (details in `sports/_index.md`)
-- Plant a gooseberry (kruisbes) on the balcony
-
-## To buy (general — no rush)
-- Sandals — Teva-style, sturdy outdoor sandals
-- Barefoot shoes — versatile for everyday, running, and light water exposure (e.g. Vivobarefoot, Merrell Vapor Glove)
-- Waterproof barefoot running shoes
-- Daypack
+- Enjoys bodyweight/calisthenics over gym equipment. Hobby: salsa dancing.
+- See `sports/_index.md` for routine, exercises, and experiments
 
 ## Tools & gear
 - **Whoop** — wearable fitness/recovery tracker
-- **Charachorder** — alternative keyboard using chord-based typing. Built a custom chord library over ~3 weeks (Feb 2026). Much deeper and harder than expected. Believes it's the right long-term investment for a better computer interface, but also uncertain. Currently pausing to integrate it into daily use. Next phase: integration into actual workflow (post-Argentina).
+- **Charachorder** — alternative keyboard using chord-based typing. Built a custom chord library over ~3 weeks (Feb 2026). Believes it's the right long-term investment but uncertain. Next phase: integration into actual workflow (post-Argentina).
+
+## Entertainment preferences
+See `entertainment/watchlist.md` for specific titles.
+- **Two watching modes**: solo (less frequent — actively limits solo screen time) and with Ira (more frequent)
+- **Solo**: drawn to power, success, ambition themes. Smart, powerful characters with strong personalities (Suits, Billions)
+- **With Ira**: enjoys strong/smart lead characters, crime/thriller-adjacent (The Mentalist, Jack Ryan)
+- Struggles with pure sci-fi; enjoys post-apocalyptic themes when they focus on society-building and human dynamics
 
 ## Travel preferences
 See `travel/preferences.md` for full details — accommodation, packing, booking strategy, destinations wishlist.
-- **Walking-first** — David & Ira prefer exploring cities on foot. Long walks across neighborhoods are part of the experience, not just transit.
-- **Active exploration** — fits their fitness-oriented lifestyle; walking 1.5+ hours to a destination is normal and enjoyable.
-- **Hiking-oriented** — loves hiking for exploration, physical challenge, and pushing personal limits.
-
-## Entertainment preferences
-- **Two watching modes**: solo (less frequent — actively limits solo screen time) and with Ira (more frequent)
-- Struggles with pure sci-fi — hard to suspend disbelief when it gets too out-there
-- Enjoys post-apocalyptic / survival themes when they focus on society-building and human dynamics (e.g. liked early seasons of *The 100*)
-- More drawn to the "how do people organize and build" angle than the sci-fi setting itself
-- **Solo**: drawn to power, success, ambition themes. Smart, powerful characters with strong personalities and character development (Suits, Billions)
-- **With Ira**: enjoys strong/smart lead characters, crime/thriller-adjacent (The Mentalist, Jack Ryan)
-- Notices when shows decline in quality over seasons (Jack Ryan)
