@@ -19,7 +19,7 @@
 - See `people/family.md` for detailed family dynamics
 
 ## Core traits
-- **Builder mindset** — Loves progressing, creating, and building things (in work and life). Drawn to stories about building something from nothing. This goes back to childhood: was already making board games (Monopoly) and projects with friends as a kid. Believes childhood interests are a strong indicator of what you actually enjoy as an adult.
+- **Builder mindset** — Loves progressing, creating, and building things (in work and life). Drawn to stories about building something from nothing.
 - **Achievement-driven** — Puts pressure on himself to perform and progress. Driven individual who genuinely enjoys achieving things — this won't go away, only the unhealthy overdrive needs to go.
 - **Founder energy** — Several years into PetRadar; entrepreneurial, hands-on. Title is CEO but day-to-day is mostly front-end coding and product development. Increasingly drawn to engineering over business — wants to build things that are technically hard, not just operationally demanding.
 - **Practical thinker** — Prefers things that feel grounded and believable over abstract/fantastical.
@@ -35,7 +35,6 @@
 - **Internal pressure & restlessness** — Often operates from a mental mode that pushes him to perform, structure himself, and follow rules instead of listening to what he actually needs
 - **Social anxiety** — Not a skill problem; comes from constricting and shrinking when self-doubt kicks in
 - **Guilt & shame** — Carries these as a way of trying to be a better person, but they actually fuel overdrive, social anxiety, and non-strategic emotional actions. A significant source: childhood events with his sister left deep guilt and a "monster" self-image (see `people/family.md`).
-- **Fairness obsession & scorekeeping** — Strongly wants things to be fair. Tracks how much effort he puts in vs. others and feels hurt when the balance is off. "I'm putting so much effort and you're not." Feeds into resentment when others don't reciprocate appreciation or commitment. Connected to the control pattern and the CEO performance (see `recent/2026-02-27.md`).
 - **Deeper identity fear** — Sense that something is fundamentally wrong with him socially; makes even small interactions feel intense and confirm self-doubt. Roots in childhood: felt different, unappreciated, not loved/cared for.
 
 ## Root pattern
