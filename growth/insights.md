@@ -52,7 +52,8 @@ Working on this with psychologist (Feb 2026). Named "Hank" for easy reference.
 - **Common patterns**: "I'm not strong enough", "I'll create an injury", "I'm limiting Ira", "I should be more careful", "This will go wrong in the future so I need to stop now"
 - **Key realization**: Hank doesn't just cause emotional suffering — he likely causes or amplifies *physical* pain and tension too. The worry itself generates the tightness, which generates the pain, which confirms the worry.
 - **The knee metaphor**: David had a knee injury caused by a shortened hip muscle (from sitting) that twisted his knee, making running impact painful. The fix wasn't to stop running — it was to fix the underlying muscle imbalance. Same with Hank: the solution isn't being more careful with life (less running, shorter hikes, avoiding headaches). The solution is addressing the underlying tension that Hank creates. Life's "impacts" only hurt because the base is already twisted.
-- **Working on**: Letting go of Hank. Noticing when the voice is active. Origin still being explored.
+- **Reassurance-seeking loop** (identified by Sammy, Feb 2026): Hank attacks → David double-checks with people around him ("is what I'm doing alright?") → their response either temporarily soothes or confirms the attack. Either way, he's outsourcing the judgment of whether he's doing things right. Gives temporary comfort but doesn't resolve the pattern. Interpersonal friction is especially fertile ground for Hank — other people become mirrors that can confirm the "you're doing it wrong" narrative.
+- **Working on**: Letting go of Hank. Noticing when the voice is active. Breaking the reassurance-seeking loop. Origin still being explored.
 
 ## Body & intuition
 - Listening to body signals is almost always right but currently difficult
@@ -89,6 +90,17 @@ A recurring pattern David keeps rediscovering across different life domains. Man
 - Work anxiety while on holiday (Feb 2026): feeling tension about returning — afraid of unhappiness and conflicts. Recognized this as the same pattern: worrying from the mountain-top about a descent that may be fine. Not serving him to worry now when he has no idea what it'll actually be like.
 
 **Related sections**: Hank amplifies this (see above). Body & intuition shows the physical dimension. Work & achievement shows the career dimension.
+
+## Process over results
+- Doing good work consistently every day → great results over time. Chasing results directly can lead to focusing on the wrong things and lower quality daily work.
+- Connected to the sprint/burnout pattern: when David pushes extremely hard for results one day, he often burns out the next (full headache, can't work). Steady consistent progress may outperform intensity spikes.
+- Relates to the adaptive zone principle (see `growth/daily-structure.md`): consistent 40-100% beats pushing 130%.
+
+## Working style archetypes (PetRadar team)
+- **David — "the lion"**: Sprints hard, goes all-in, then needs to recover. High intensity but unsustainable without rest cycles. Strength: can move mountains in short bursts. Risk: burnout and frustration when others don't match the pace.
+- **Tom — "the stable engine"**: Does something every day at a measured pace. Doesn't push unless needed. Strength: sustainable long-term output, models a grounded approach that has sometimes genuinely inspired David. Both approaches have value.
+- **Alex**: Performs best when given tasks in her skill zone — then she pushes really hard. Struggles and resists when asked to do things outside her comfort/skill range. Strength: high performance in her domain. Limitation: the range of what she can push on is narrower than what the team needs.
+- **Key realization**: Different people work differently and should be utilized to their strengths rather than all forced into the same mode. David's hunger for a team of equally driven people may partly be about wanting appreciation for how he shows up, not necessarily identical work styles.
 
 ## Environment & reflection
 - Being in a different environment (holiday, travel) helps condense recent experiences, reflect on life, gain clarity, reconnect with motivations — even when the trip isn't ideal
